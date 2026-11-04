@@ -7,9 +7,10 @@ export const db=new DatabaseSync(process.env.DB_PATH||'storage/campus.db');
 db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS records (kind TEXT NOT NULL,id TEXT NOT NULL,data TEXT NOT NULL,PRIMARY KEY(kind,id)); CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY,value TEXT);`);
 export const all=k=>db.prepare('SELECT data FROM records WHERE kind=?').all(k).map(r=>JSON.parse(r.data));
 export const get=(k,i)=>{const r=db.prepare('SELECT data FROM records WHERE kind=? AND id=?').get(k,i);return r?JSON.parse(r.data):null};
-export const put=(k,o)=>{o.updatedAt=now();o.createdAt??=o.updatedAt;db.prepare('INSERT INTO records VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET data=excluded.data').run(k,o.id,JSON.stringify(o));return o};
+export const put=(k,o)=>{const previous=get(k,o.id);o.version=(previous?.version||0)+1;o.updatedAt=now();o.createdAt??=o.updatedAt;db.prepare('INSERT INTO records VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET data=excluded.data').run(k,o.id,JSON.stringify(o));return o};
 export const del=(k,i)=>db.prepare('DELETE FROM records WHERE kind=? AND id=?').run(k,i);
 export function tx(fn){db.exec('BEGIN IMMEDIATE');try{const r=fn();db.exec('COMMIT');return r}catch(e){db.exec('ROLLBACK');throw e}}
+const originalPlannedNames=['校园广播','校园摄影','公共浴室','共享雨伞','宿舍安全巡检','体育测试','节能倡议','校园寻物地图','校园二手集市','校史馆参观','校园活动日历','公益捐赠','绿色出行','社区服务','食堂意见簿'];
 export function seed(){if(get('users','student'))return;tx(()=>{
 if(get('users','student'))return;
 const roles=['STUDENT','TEACHER','LIBRARIAN','PRINT_OPERATOR','CANTEEN_MERCHANT','SUPER_ADMIN','CAMPUS_OPERATOR'];
@@ -23,7 +24,7 @@ for(let i=1;i<=2;i++)put('points',{id:`point${i}`,name:`${i===1?'主':'东'}校�
 for(let i=1;i<=3;i++){put('stalls',{id:`stall${i}`,name:['禾香小厨','面面俱到','轻食时光'][i-1],hallId:i<3?'hall1':'hall2',open:true});for(let j=1;j<=10;j++)put('products',{id:`product${i}-${j}`,stallId:`stall${i}`,name:['番茄炒蛋饭','香菇鸡肉饭','时蔬套餐','红烧牛肉饭','鲜蔬面'][j%5],priceCents:1000+j*100,remaining:50,active:true})}
 for(let i=1;i<=2;i++)put('halls',{id:`hall${i}`,name:`${i===1?'第一':'第二'}食堂`});
 const apps=[['library','图书服务','/library'],['printing','在线打印','/printing'],['dining','智慧食堂','/dining'],['notifications','站内消息','/notifications'],['me','个人中心','/me']];
-for(let i=0;i<20;i++){const a=apps[i];put('apps',{id:a?.[0]||`planned${i}`,name:a?.[1]||['课表查询','校园报修','场馆预约'][i%3],internalPath:a?.[2]||'',description:a?'校园便捷服务':'规划中，未接入真实系统',category:i%2?'生活服务':'学习服务',status:a?'ACTIVE':'PLANNED'})}
+for(let i=0;i<20;i++){const a=apps[i];put('apps',{id:a?.[0]||`planned${i}`,code:a?.[0]||`planned${i}`,name:a?.[1]||originalPlannedNames[i-5],internalPath:a?.[2]||'',description:a?'校园便捷服务':'规划中，未接入真实系统',category:a?({library:'图书服务',printing:'生活服务',dining:'生活服务',notifications:'智慧服务',me:'学生服务'}[a[0]]):'生活服务',status:a?'ACTIVE':'PLANNED'})}
 for(let i=1;i<=6;i++)put('announcements',{id:`notice${i}`,title:['欢迎使用校园服务工作台','图书预约服务使用指南','打印服务开放通知'][i%3],body:'本平台为演示环境，所有身份与业务数据均为虚构。',status:'PUBLISHED'});
 for(let i=1;i<=8;i++)put('notifications',{id:`msg${i}`,userId:'student',title:'校园服务使用提醒',body:'欢迎体验图书、打印与食堂服务。',readAt:null,targetPath:'/apps'});
 });}
@@ -39,3 +40,32 @@ if(!get('diningOrders',`history-dining-${n}`))put('diningOrders',{id:`history-di
 }
 for(const name of ['学习服务','生活服务'])if(!get('categories',name))put('categories',{id:name,name,sortOrder:0});
 
+
+
+const expanded={
+'行政服务':['公文管理','印章申请','会议室预约','车辆申请','差旅申请','经费报销','合同管理','采购申请','资产管理','办公用品','用章查询','信息公开','制度文件','值班安排','人事服务','工资查询'],
+'教学服务':['课表查询','选课中心','成绩查询','教学评价','培养方案','考试安排','课程资源','实践教学','实习管理','教室借用','教学检查','教学日历','课程建设','教师培训','科研项目','论文成果'],
+'学生服务':['学籍信息','学生请假','奖助学金','勤工助学','心理预约','就业指导','毕业离校','迎新报到','宿舍申请','学生证补办','证明申请','社团活动','志愿服务','第二课堂','竞赛报名','辅导员服务'],
+'图书服务':['馆藏检索','图书推荐','电子期刊','数据库资源','座位预约','研讨间预约','文献传递','阅读活动','学术讲座','馆际互借','新书速递','学科导航'],
+'生活服务':['校园报修','场馆预约','快递服务','校园班车','失物招领','一卡通服务','网络缴费','水电查询','洗衣服务','医疗服务','校园地图','便民电话','访客预约','校园超市','住宿查询','生活指南'],
+'智慧服务':['统一身份认证','企业微信绑定','数字档案','数据看板','智慧门禁','智慧停车','校园物联网','服务评价','意见反馈','信息安全','网络服务','数字证明','办事大厅','智慧教室','校园开放日','校友服务']};
+for(const [category,names] of Object.entries(expanded)){
+if(!get('categories',category))put('categories',{id:category,name:category,sortOrder:0});
+for(const [n,name] of names.entries()){const code='planned-'+Object.keys(expanded).indexOf(category)+'-'+n;if(!get('apps',code))put('apps',{id:code,code,name,category,description:'规划中 · 未接入真实系统',status:'PLANNED',internalPath:'',externalUrl:'',roles:[]})}
+}
+if(!get('banners','welcome'))put('banners',{id:'welcome',title:'校园服务，一站直达',body:'云栖职业技术学院演示工作台 · 图书、打印、食堂服务已开放本地体验',targetPath:'/apps',enabled:true,sortOrder:0});
+const extendedApps={
+'行政服务':['电子签章','流程中心','校务督办','会议纪要','预算申请','项目立项','招标公告','固定资产盘点','校车管理','行政通讯录'],
+'教学服务':['调停课申请','补考报名','重修申请','教研活动','课堂考勤','教学督导','教材申报','实验预约','教学质量','毕业设计'],
+'学生服务':['奖惩查询','学费查询','助学贷款','困难认定','国防教育','军训管理','学生活动','宿舍调换','毕业去向','档案转递'],
+'图书服务':['借阅排行榜','荐购记录','阅读积分','专题书单','文献检索培训','阅读证办理','馆藏分布','开放时间','图书馆咨询','资源试用'],
+'生活服务':['校医预约','药房服务','宿舍访客','共享单车','校园充电','饮水服务','运动健康','校园文创','校园气象','交通指引'],
+'智慧服务':['可信认证','电子校园卡','知识产权','科研仪器','智慧实验室','校园网络诊断','安全培训','数字资源中心','服务工单','电子表单']};
+for(const [category,names] of Object.entries(extendedApps))for(const [n,name] of names.entries()){const code='extended-'+Object.keys(extendedApps).indexOf(category)+'-'+n;if(!get('apps',code))put('apps',{id:code,code,name,category,description:'规划中 · 未接入真实系统',status:'PLANNED',internalPath:'',externalUrl:'',roles:[]})}
+
+
+// Non-destructive version migration for demo databases created before version tracking.
+for(const row of db.prepare('SELECT kind,data FROM records').all()){const record=JSON.parse(row.data);if(!Number.isInteger(record.version))put(row.kind,record)}
+
+// Migrate only untouched legacy planned entries; preserve all user-edited metadata.
+for(let i=5;i<20;i++){const old=get('apps','planned'+i);if(old?.status==='PLANNED'&&old.name===['课表查询','校园报修','场馆预约'][i%3])put('apps',{...old,name:originalPlannedNames[i-5]})}

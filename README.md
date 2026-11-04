@@ -47,3 +47,13 @@ test:ui要求本机Chrome及已启动的localhost:3000服务；截图输出到�
 ## 限制
 
 本版是可运行演示，不能视为全部P0验收通过。技术栈、页面和数据模型差异见IMPLEMENTATION_NOTES.md与QC_REPORT.md。真实身份、企微、图书馆、打印设备、支付、恶意文件扫描、生产容量验证均未接入或未执行。不可用于5000人生产并发承诺。未部署公网。
+
+## 企业微信承载与参考图
+
+主入口按用户提供的企业微信工作台截图实现：约134px网页导航、90px顶部区域、八列紧凑卡片、分类/搜索/收藏。网页导航是独立预览的演示导航；企业微信客户端原生栏由企业微信提供。图标使用Lucide官方SVG并附许可证，未复制第三方应用品牌标识。
+
+真实企业微信接入需要学校提供企业ID、应用AgentID、经批准的回调域名与应用可见范围、成员标识映射，以及通过安全渠道配置的应用密钥。不要把密钥写进仓库、Notion或聊天。当前入口明确返回未接入，不模拟OAuth成功。
+
+重置演示：先停止Web与worker并备份storage，再执行 node server/reset-demo.mjs --confirm=RESET_DEMO。production和storage目录之外的数据库会拒绝重置。
+
+浏览器验收脚本默认保存artifacts/screenshots，支持SCREENSHOT_DIR指定路径；需要Chrome及已启动服务。首次浏览器截图旧版为门户，新版企业微信工作台检查以design-qa.md为准。

@@ -16,6 +16,7 @@
     "test:ui": "node scripts/ui-check.mjs"
   },
   "dependencies": {
+    "lucide-static": "1.68.0",
     "next": "16.4.5",
     "pdf-lib": "1.17.1",
     "react": "19.3.1",

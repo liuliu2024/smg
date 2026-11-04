@@ -4,7 +4,7 @@
 
 ## 结果
 
-最新实际执行 `node --test tests/*.test.mjs`：39项通过、0失败（包含3个父用例与36个业务子用例），退出码0。测试文件为acceptance.test.mjs、extended.test.mjs及jobs.test.mjs。独立临时SQLite数据库，不使用演示业务库。
+最新实际执行 `node --test tests/*.test.mjs`：49项通过、0失败（包含4个父用例与45个业务子用例），退出码0。测试文件为acceptance.test.mjs、extended.test.mjs、jobs.test.mjs及continuation.test.mjs。独立临时SQLite数据库，不使用演示业务库。
 
 首次默认执行环境无法连接本地HTTP，报 `connect EACCES 127.0.0.1:3199`；获得网络执行权限后同一命令成功。该首次失败属于执行环境限制，不记录为业务通过。
 
@@ -43,3 +43,13 @@
 
 QC资源名注入修复回归：馆员尝试/admin/library/sessions、files、printOrders、users均返回404。随后全量39项通过，0失败。
 
+
+## P0续开发验收
+
+最新命令 `node --test tests/*.test.mjs`：49项通过、0失败（45业务子项及4父项）。新增验证：后台默认20条、最大100条、超限422、分页meta及关键词/状态筛选和姓名排序；轮播CRUD及首页轮播、最近使用与待办结构；书目详情实体册；公告详情发布可见性；库存范围与版本冲突409；打印异常恢复前态或附原因取消；新打印规则改变未来报价而旧订单价格快照不变；自定义MANAGE_CONTENT只能访问内容及轮播；reset缺确认、production与storage外路径拒绝；准确确认后仅对专用随机测试库重置并重新seed成功。
+
+重置测试仅使用storage中的随机test-reset数据库，结束后清理该测试库及其SQLite旁文件，没有重置正在演示的campus.db。首次分页测试假设超限参数会自动截断，实际接口正确拒绝422；测试断言已按规格“最大100”修正，不是产品缺陷。
+
+## 最终浏览器复核
+
+IAB实际检查企业微信密集工作台：1280×1512同参考尺寸进行并排对比；搜索在线打印后进入真实表单；390移动document.scrollWidth=375，没有整页横向溢出；后台用户130条从第1/7页翻至第2/7页，实际记录变化。修正用户ACTIVE文案后复核为已启用。浏览器错误日志读取结果为空。新版截图与比较图保存在交付工作区outputs/screenshots。此前旧版门户截图不作为新版视觉证据。

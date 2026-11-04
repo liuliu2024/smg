@@ -25,3 +25,15 @@ GET/POST `admin/printing/points|prices`; GET/POST `admin/dining/stalls|products`
 POST admin/jobs/run resets periodic tasks then executes once; POST admin/jobs/:id/retry retries that task. Jobs persist claim/lock, stale lock reclaim after 5 minutes, max 3 retries, next execution at 60 seconds. FILE_CLEANUP and RESERVATION_EXPIRY are built in. GET files/sample downloads a generated one-page demo PDF.
 
 Current limitations replacing earlier draft notes: configuration CRUD and job locking/retry are implemented; custom low risk role definitions exist but do not yet dynamically confer built-in business permissions. Remaining backend gaps include normalized relational Prisma schema, comprehensive pagination/sorting, banner/recent-use operational editors, and production adapters. SQLite demo execution is not production capacity validation.
+
+## P0 continuation
+- Admin GET array responses are paginated: query page (default1), pageSize (default20,max100), q, status, sort=createdAt|updatedAt|name|title|status, order=asc|desc. Response data remains array; meta has page/pageSize/total/totalPages.
+- home now includes banners, recentUses (embedded app), todos. POST apps/:id/use persists recent use. GET announcements and announcements/:id respects publication, target role and expiry.
+- GET library/books/:id includes independent copies with id,barcode,status,location.
+- admin/banners CRUD fields title/body/targetPath/enabled/sortOrder.
+- admin/dining/inventory GET/POST fields variantId,date,slot,remaining,version(optional). Merchant scope is enforced; stale supplied version returns409.
+- Printing resolve accepts resolution=cancel and reason to cancel EXCEPTION; default restores previous status. Cancellation clears pickup credential.
+- Every record update increments version. New normalized-schema migration is still pending; generic records and transaction checks remain the demo persistence layer.
+- Custom MANAGE_CONTENT permission is limited to content/banners. It does not allow stats, messages, apps, audit, integrations, settings, users or business operations.
+- Demo app seed contains172 entries:5 ACTIVE core services and167 explicitly PLANNED entries across six campus categories. This catalog is not a claim of implemented external integrations.
+- Reset: stop web+worker, APP_MODE=demo, node server/reset-demo.mjs --confirm=RESET_DEMO. Without exact confirmation or in production, reset refuses. Only a DB within the local storage directory is accepted.

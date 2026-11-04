@@ -7,3 +7,4 @@ storage/
 *.db-wal
 test-results/
 playwright-report/
+artifacts/
