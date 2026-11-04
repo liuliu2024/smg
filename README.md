@@ -11,7 +11,7 @@ npm ci
 npm run dev
 ```
 
-浏览器打开 http://localhost:3000 。命令同时启动 Next.js Web 和每60秒运行的数据库任务 worker。使用 localhost，不要改用127.0.0.1（修改请求需要匹配Origin）。如改端口，同时配置PORT与APP_ORIGIN。复制.env.example仅供参考；本项目读取进程环境变量，未自动加载.env文件。
+浏览器打开 http://localhost:3000 。命令同时启动 Next.js Web 和每60秒运行的数据库任务 worker。使用 localhost，不要改用127.0.0.1（修改请求需要匹配Origin）。如改端口，同时配置PORT与APP_ORIGIN。可复制.env.example为.env；启动脚本使用Node24加载该文件，进程已有环境变量优先。
 
 首次导入服务端会创建 storage/campus.db 和幂等演示数据；不会在每次启动清空数据库。SQLite迁移以 CREATE TABLE IF NOT EXISTS 执行，当前为通用JSON记录模型，非规格要求的Prisma关系迁移。
 
@@ -42,7 +42,7 @@ test:ui要求本机Chrome及已启动的localhost:3000服务；截图输出到�
 
 ## 数据与恢复
 
-数据和PDF在storage，文件不通过静态目录提供。备份前停止Web与worker，将整个storage目录复制到安全位置；恢复时同样停止服务后替换目录。SQLite WAL运行中不可只复制主db文件。当前未提供reset-demo脚本，重置必须停止服务并人工确认后备份、移走storage目录再启动；不可对生产数据使用。
+数据和PDF在storage，文件不通过静态目录提供。备份前停止Web与worker，将整个storage目录复制到安全位置；恢复时同样停止服务后替换目录。SQLite WAL运行中不可只复制主db文件。重置必须停止Web和worker并备份，然后显式执行node server/reset-demo.mjs --confirm=RESET_DEMO；拒绝production和storage目录外数据库。
 
 ## 限制
 
@@ -57,3 +57,15 @@ test:ui要求本机Chrome及已启动的localhost:3000服务；截图输出到�
 重置演示：先停止Web与worker并备份storage，再执行 node server/reset-demo.mjs --confirm=RESET_DEMO。production和storage目录之外的数据库会拒绝重置。
 
 浏览器验收脚本默认保存artifacts/screenshots，支持SCREENSHOT_DIR指定路径；需要Chrome及已启动服务。首次浏览器截图旧版为门户，新版企业微信工作台检查以design-qa.md为准。
+
+
+## 新增可用服务
+
+在既有图书、打印、食堂基础上，新增校园报修、场地预约、失物招领、活动报名、意见反馈、证明申请、校园二手、校园办事八个持久化闭环。运营/超管可在后台处理工单、审核本地申请、维护场地与活动；申请人只访问本人私有记录。公开失物和二手信息采用昵称，认领说明仅相关人可见。
+
+校园办事整合10种申请，活动整合校园活动/志愿服务/竞赛报名；同类入口归并为别名，不重复实现。所有审批均为本地演示，不代表学校正式证明、教务决定或财务审批。
+
+公开目录约150项（当前154项），其中13项可用；首页默认可用服务，可切换全部/待接入。左侧12类导航，首页支持同义词快速过滤与回车全局搜索（应用/公告/图书/菜品）。未接入外部系统的目录不会伪装可用。
+
+当前全量自动化66项通过，详见TEST_REPORT。内嵌浏览器不支持原生prompt，现已替换为页面内异步对话框。
+

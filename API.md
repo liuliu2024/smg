@@ -37,3 +37,34 @@ Current limitations replacing earlier draft notes: configuration CRUD and job lo
 - Custom MANAGE_CONTENT permission is limited to content/banners. It does not allow stats, messages, apps, audit, integrations, settings, users or business operations.
 - Demo app seed contains172 entries:5 ACTIVE core services and167 explicitly PLANNED entries across six campus categories. This catalog is not a claim of implemented external integrations.
 - Reset: stop web+worker, APP_MODE=demo, node server/reset-demo.mjs --confirm=RESET_DEMO. Without exact confirmation or in production, reset refuses. Only a DB within the local storage directory is accepted.
+
+## Additional local campus workflows
+Eight new modules are local persisted workflows, not integrations to school finance, medical, identity, device or official certificate systems. Directory entries with the same local workflow are merged, with aliases searchable; remaining external services stay PLANNED.
+
+GET `/services/:module` returns `{config,records,options}`; GET `/services/:module/:id` returns detail. POST `/services/:module` creates; POST `/:id/cancel` or `/:id/action` takes `{action,...}`. Operator paths use `/admin/services/:module` and `/admin/services/:module/:id/action`. Every record/detail contains `allowedActions` strings determined by the actual caller and state. POST operations support Idempotency-Key inside one SQLite transaction, including inventory reservation and stored response.
+
+| Module | Create fields | States and operations |
+|---|---|---|
+| repairs | title,description,location | SUBMITTED → accept → ACCEPTED → start → PROCESSING → resolve → RESOLVED → owner close → CLOSED; operator reject from SUBMITTED; owner cancel from SUBMITTED |
+| venues | venueId,date YYYY-MM-DD,slot,purpose | CONFIRMED; owner/operator cancel before start; same venue/date/hour conflicts409 |
+| lost | title,description,location,type LOST or FOUND | OPEN; another user claim with reason → CLAIM_PENDING; publisher/operator confirm-return with claimId → RETURNED; close → CLOSED |
+| activities | eventId | REGISTERED; duplicate active enrollment409; atomic capacity decrement; pre-start cancel restores once |
+| feedback | title,description,category | SUBMITTED → process → PROCESSING → resolve → RESOLVED → owner close → CLOSED; owner initial cancel |
+| certificates | type 在读证明/成绩证明/实习证明,purpose | SUBMITTED → approve/reject → APPROVED/REJECTED; approved reference has DEMO prefix and is not an official certificate |
+| marketplace | title,description,priceCents integer,category | ACTIVE → owner sold/withdraw → SOLD/WITHDRAWN; operator withdraw |
+| affairs | type 印章申请/差旅申请/教室借用/行政事项,title,description | SUBMITTED → operator approve/reject; local manual workflow only, no real finance or document issuance |
+
+Operators are CAMPUS_OPERATOR or SUPER_ADMIN. Status processing takes a required reason, persisted as response. Users see only their private records; public lost/marketplace records omit userId and show a nickname. Claim reasons are returned only in detail to the publisher, that claimant, or operators. Each status mutation writes audit and durable deduplicated notifications in the same transaction.
+
+Seed options include venue1–venue3 and event1–event3. Venue hour slots are09:00/10:00/14:00/15:00/19:00 Beijing time, one hour each, future30 days. GET/POST `/admin/services/venues/options` manages venue resources; `/admin/services/activities/options` manages events. Fields: id optional for update, name,location,capacity integer1–10000,enabled boolean; events also require startsAt ISO and description. Event capacity cannot fall below actual enrollment, remaining is recalculated, and enrolled events cannot change their start time.
+
+Module business routes enforce the mapped application's status and role visibility. Custom roles additionally require VIEW_PORTAL to submit ordinary requests; MANAGE_CONTENT alone cannot submit or read private campus records.
+
+### Follow-up workflow refinements
+Lost-item claimants can retain access to their related post after RETURNED/CLOSED, with `isClaimant` and `myClaims` containing only their own claim outcomes. Detail claims remain restricted to the publisher, that claimant, or operators; public records never expose other claims.
+
+`options.affairTypes` is authoritative for the local application form: 印章申请、差旅申请、教室借用、行政事项、学生请假、宿舍申请、学生证补办、档案转递、补考报名、重修申请. These are local submissions and manual reviews; they do not synchronize school systems or establish official decisions. Certificate and affairs records/details keep explicit notices.
+
+`options.eventTypes`: 校园活动、志愿服务、竞赛报名. Event resource management accepts optional eventType; seed has a volunteer event and event4 creative challenge. Matching directory aliases are merged into the same functional module rather than counted as separately implemented external services.
+
+Existing demo database upgrades merge official aliases while preserving custom aliases, update descriptions only when they match prior seed defaults, and preserve user-customized descriptions. ACTIVE card descriptions explain user tasks rather than implementation details.

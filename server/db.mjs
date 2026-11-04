@@ -10,6 +10,7 @@ export const get=(k,i)=>{const r=db.prepare('SELECT data FROM records WHERE kind
 export const put=(k,o)=>{const previous=get(k,o.id);o.version=(previous?.version||0)+1;o.updatedAt=now();o.createdAt??=o.updatedAt;db.prepare('INSERT INTO records VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET data=excluded.data').run(k,o.id,JSON.stringify(o));return o};
 export const del=(k,i)=>db.prepare('DELETE FROM records WHERE kind=? AND id=?').run(k,i);
 export function tx(fn){db.exec('BEGIN IMMEDIATE');try{const r=fn();db.exec('COMMIT');return r}catch(e){db.exec('ROLLBACK');throw e}}
+const serviceDescriptions={library:'检索馆藏，预约取书，查看借阅与归还记录',printing:'上传PDF，确认页码与报价，跟踪打印和取件',dining:'选择档口与餐段，预订餐品并查看取餐进度',notifications:'查看服务提醒、处理结果与个人站内消息',me:'查看个人身份、收藏和各项校园服务记录',repairs:'提交校园设施故障，跟踪受理与维修进度',venues:'查看可预约场地，选择日期时段并管理预约',lost:'发布寻物与招领信息，核实认领并确认归还',activities:'查看校园活动与剩余名额，报名或取消参加',feedback:'提交服务建议与问题，查看工作人员回复',certificates:'提交证明申请，查看人工审核意见与演示结果',marketplace:'发布闲置物品，浏览校园二手信息并管理上下架',affairs:'在线提交校园办事申请，查看审核意见与处理进度'};
 const originalPlannedNames=['校园广播','校园摄影','公共浴室','共享雨伞','宿舍安全巡检','体育测试','节能倡议','校园寻物地图','校园二手集市','校史馆参观','校园活动日历','公益捐赠','绿色出行','社区服务','食堂意见簿'];
 export function seed(){if(get('users','student'))return;tx(()=>{
 if(get('users','student'))return;
@@ -24,7 +25,7 @@ for(let i=1;i<=2;i++)put('points',{id:`point${i}`,name:`${i===1?'主':'东'}校�
 for(let i=1;i<=3;i++){put('stalls',{id:`stall${i}`,name:['禾香小厨','面面俱到','轻食时光'][i-1],hallId:i<3?'hall1':'hall2',open:true});for(let j=1;j<=10;j++)put('products',{id:`product${i}-${j}`,stallId:`stall${i}`,name:['番茄炒蛋饭','香菇鸡肉饭','时蔬套餐','红烧牛肉饭','鲜蔬面'][j%5],priceCents:1000+j*100,remaining:50,active:true})}
 for(let i=1;i<=2;i++)put('halls',{id:`hall${i}`,name:`${i===1?'第一':'第二'}食堂`});
 const apps=[['library','图书服务','/library'],['printing','在线打印','/printing'],['dining','智慧食堂','/dining'],['notifications','站内消息','/notifications'],['me','个人中心','/me']];
-for(let i=0;i<20;i++){const a=apps[i];put('apps',{id:a?.[0]||`planned${i}`,code:a?.[0]||`planned${i}`,name:a?.[1]||originalPlannedNames[i-5],internalPath:a?.[2]||'',description:a?'校园便捷服务':'规划中，未接入真实系统',category:a?({library:'图书服务',printing:'生活服务',dining:'生活服务',notifications:'智慧服务',me:'学生服务'}[a[0]]):'生活服务',status:a?'ACTIVE':'PLANNED'})}
+for(let i=0;i<20;i++){const a=apps[i];put('apps',{id:a?.[0]||`planned${i}`,code:a?.[0]||`planned${i}`,name:a?.[1]||originalPlannedNames[i-5],internalPath:a?.[2]||'',description:a?serviceDescriptions[a[0]]:'规划中，未接入真实系统',category:a?({library:'图书服务',printing:'生活服务',dining:'生活服务',notifications:'智慧服务',me:'学生服务'}[a[0]]):'生活服务',status:a?'ACTIVE':'PLANNED'})}
 for(let i=1;i<=6;i++)put('announcements',{id:`notice${i}`,title:['欢迎使用校园服务工作台','图书预约服务使用指南','打印服务开放通知'][i%3],body:'本平台为演示环境，所有身份与业务数据均为虚构。',status:'PUBLISHED'});
 for(let i=1;i<=8;i++)put('notifications',{id:`msg${i}`,userId:'student',title:'校园服务使用提醒',body:'欢迎体验图书、打印与食堂服务。',readAt:null,targetPath:'/apps'});
 });}
@@ -69,3 +70,28 @@ for(const row of db.prepare('SELECT kind,data FROM records').all()){const record
 
 // Migrate only untouched legacy planned entries; preserve all user-edited metadata.
 for(let i=5;i<20;i++){const old=get('apps','planned'+i);if(old?.status==='PLANNED'&&old.name===['课表查询','校园报修','场馆预约'][i%3])put('apps',{...old,name:originalPlannedNames[i-5]})}
+
+// Additional campus modules use fictitious resources and explicit local workflows.
+tx(()=>{
+for(const [i,name] of ['综合运动馆','学生活动室','图书研讨室'].entries())if(!get('campusVenues','venue'+(i+1)))put('campusVenues',{id:'venue'+(i+1),name,location:'演示主校区',capacity:[20,30,8][i],enabled:true});
+for(const [i,name] of ['校园阅读分享会','绿色校园志愿活动','职业成长工作坊'].entries())if(!get('campusEvents','event'+(i+1)))put('campusEvents',{id:'event'+(i+1),name,description:'虚构演示活动，报名不发送真实通知',location:'演示学生活动中心',capacity:20,remaining:20,enabled:true,startsAt:new Date(Date.now()+(i+2)*86400000).toISOString()});
+for(const [eventId,eventType] of [['event1','校园活动'],['event2','志愿服务'],['event3','校园活动']]){const event=get('campusEvents',eventId);if(event&&!event.eventType)put('campusEvents',{...event,eventType})}
+if(!get('campusEvents','event4'))put('campusEvents',{id:'event4',name:'校园创意作品挑战赛',description:'演示校内交流活动，报名不代表正式竞赛资格或获奖证明',location:'演示创客空间',eventType:'竞赛报名',capacity:20,remaining:20,enabled:true,startsAt:new Date(Date.now()+5*86400000).toISOString()});
+const moduleApps=[
+['repairs','校园报修','后勤生活',[]],['venues','场馆预约','运动场馆',['教室借用','研讨间预约']],['lost','失物招领','后勤生活',['校园寻物地图']],['activities','社团活动','校园活动',['校园活动日历','阅读活动','学生活动','志愿服务','竞赛报名']],['feedback','意见反馈','交流反馈',['食堂意见簿','服务评价']],['certificates','证明申请','学工服务',[]],['marketplace','校园二手集市','校园交易',[]],['affairs','办事大厅','行政办公',['印章申请','差旅申请','学生请假','宿舍申请','学生证补办','档案转递','补考报名','重修申请']]
+];
+for(const [module,name,category,aliases] of moduleApps){let app=all('apps').find(x=>x.coreModule===module);if(!app)app=all('apps').find(x=>x.name===name&&x.status==='PLANNED');if(app&&!app.coreModule){put('apps',{...app,coreModule:module,status:'ACTIVE',category,internalPath:'/services/'+module,description:serviceDescriptions[module],aliases})}if(app?.coreModule){const combined=[...new Set([...(app.aliases||[]),...aliases])];if(combined.length!==(app.aliases||[]).length)put('apps',{...get('apps',app.id),aliases:combined})}if(app)for(const alias of aliases){const duplicate=all('apps').find(x=>x.name===alias&&x.status==='PLANNED'&&!x.coreModule);if(duplicate)put('apps',{...duplicate,status:'DISABLED',mergedInto:app.id})}}
+const categoryRules=[['学习服务','教学教务'],['行政服务','行政办公'],['教学服务','教学教务'],['学生服务','学工服务'],['图书服务','图书资源'],['生活服务','后勤生活'],['智慧服务','数字服务']];
+for(const app of all('apps')){const match=categoryRules.find(([old])=>app.category===old);if(match)put('apps',{...app,category:match[1]})}
+for(const [name,category] of [['就业指导','就业实习'],['实习管理','就业实习'],['毕业去向','就业实习'],['科研项目','科研发展'],['论文成果','科研发展'],['知识产权','科研发展'],['科研仪器','科研发展'],['场馆预约','运动场馆'],['体育测试','运动场馆'],['运动健康','运动场馆'],['国际交流','交流反馈']]){const app=all('apps').find(x=>x.name===name);if(app&&['后勤生活','教学教务','学工服务','数字服务'].includes(app.category))put('apps',{...app,category})}
+for(const [index,name] of ['行政办公','教学教务','学工服务','图书资源','后勤生活','运动场馆','校园活动','就业实习','科研发展','数字服务','校园交易','交流反馈'].entries())if(!get('categories',name))put('categories',{id:name,name,sortOrder:index});
+
+for(const app of all('apps')){const description=serviceDescriptions[app.coreModule||app.id];if(description&&['校园便捷服务','本地演示闭环 · 未连接学校真实外部系统'].includes(app.description))put('apps',{...app,description})}
+const affairsApp=all('apps').find(a=>a.coreModule==='affairs');if(affairsApp?.name==='办事大厅')put('apps',{...affairsApp,name:'校园办事'});
+for(const legacy of ['学习服务','生活服务','行政服务','教学服务','学生服务','图书服务','智慧服务']){const c=get('categories',legacy);if(c?.name===legacy&&!all('apps').some(a=>a.category===legacy))del('categories',legacy)}
+
+});
+
+
+
+

@@ -7,12 +7,12 @@
     "node": ">=24.0.0"
   },
   "scripts": {
-    "dev": "node server/dev.mjs",
-    "start": "node server/dev.mjs --production",
-    "worker": "node server/worker.mjs",
+    "dev": "node --env-file-if-exists=.env server/dev.mjs",
+    "start": "node --env-file-if-exists=.env server/dev.mjs --production",
+    "worker": "node --env-file-if-exists=.env server/worker.mjs",
     "test": "node --test tests/*.test.mjs",
     "build": "next build",
-    "start:standalone": "node server/main.mjs",
+    "start:standalone": "node --env-file-if-exists=.env server/main.mjs",
     "test:ui": "node scripts/ui-check.mjs"
   },
   "dependencies": {
