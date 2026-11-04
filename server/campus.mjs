@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto';
 import {all,get,put,id,now,tx} from './db.mjs';
 import {fail,need,role,audit,notify} from './services.mjs';
-const affairTypes=['印章申请','差旅申请','教室借用','行政事项','学生请假','宿舍申请','学生证补办','档案转递','补考报名','重修申请'];
+const affairTypes=['印章申请','差旅申请','教室借用','行政事项','学生证补办','档案转递','补考报名','重修申请'];
 const eventTypes=['校园活动','志愿服务','竞赛报名'];
 const definitions={
 repairs:{name:'校园报修',fields:['title','description','location'],initial:'SUBMITTED',transitions:{accept:['SUBMITTED','ACCEPTED'],start:['ACCEPTED','PROCESSING'],resolve:['PROCESSING','RESOLVED'],reject:['SUBMITTED','REJECTED']}},
@@ -61,6 +61,7 @@ put(kind(module),o);message(u,module,o,o.status);return visible(u,module,o,admin
 };
 const response=tx(()=>{if(!key)return execute();need(typeof key==='string'&&key.length<=200,'幂等键无效');const requestHash=createHash('sha256').update(JSON.stringify({m,p,b})).digest('hex');const kid='campus:'+u.id+':'+p.join('/')+':'+key;const prior=get('idempotency',kid);if(prior){if(prior.requestHash!==requestHash)fail(409,'幂等键内容冲突');return prior.response}const result=execute();put('idempotency',{id:kid,requestHash,response:result});return result});return {handled:true,data:response};
 }
+
 
 
 

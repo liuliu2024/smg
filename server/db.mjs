@@ -78,7 +78,7 @@ for(const [i,name] of ['校园阅读分享会','绿色校园志愿活动','职�
 for(const [eventId,eventType] of [['event1','校园活动'],['event2','志愿服务'],['event3','校园活动']]){const event=get('campusEvents',eventId);if(event&&!event.eventType)put('campusEvents',{...event,eventType})}
 if(!get('campusEvents','event4'))put('campusEvents',{id:'event4',name:'校园创意作品挑战赛',description:'演示校内交流活动，报名不代表正式竞赛资格或获奖证明',location:'演示创客空间',eventType:'竞赛报名',capacity:20,remaining:20,enabled:true,startsAt:new Date(Date.now()+5*86400000).toISOString()});
 const moduleApps=[
-['repairs','校园报修','后勤生活',[]],['venues','场馆预约','运动场馆',['教室借用','研讨间预约']],['lost','失物招领','后勤生活',['校园寻物地图']],['activities','社团活动','校园活动',['校园活动日历','阅读活动','学生活动','志愿服务','竞赛报名']],['feedback','意见反馈','交流反馈',['食堂意见簿','服务评价']],['certificates','证明申请','学工服务',[]],['marketplace','校园二手集市','校园交易',[]],['affairs','办事大厅','行政办公',['印章申请','差旅申请','学生请假','宿舍申请','学生证补办','档案转递','补考报名','重修申请']]
+['repairs','校园报修','后勤生活',[]],['venues','场馆预约','运动场馆',['教室借用','研讨间预约']],['lost','失物招领','后勤生活',['校园寻物地图']],['activities','社团活动','校园活动',['校园活动日历','阅读活动','学生活动','志愿服务','竞赛报名']],['feedback','意见反馈','交流反馈',['食堂意见簿','服务评价']],['certificates','证明申请','学工服务',[]],['marketplace','校园二手集市','校园交易',[]],['affairs','办事大厅','行政办公',['印章申请','差旅申请','学生证补办','档案转递','补考报名','重修申请']]
 ];
 for(const [module,name,category,aliases] of moduleApps){let app=all('apps').find(x=>x.coreModule===module);if(!app)app=all('apps').find(x=>x.name===name&&x.status==='PLANNED');if(app&&!app.coreModule){put('apps',{...app,coreModule:module,status:'ACTIVE',category,internalPath:'/services/'+module,description:serviceDescriptions[module],aliases})}if(app?.coreModule){const combined=[...new Set([...(app.aliases||[]),...aliases])];if(combined.length!==(app.aliases||[]).length)put('apps',{...get('apps',app.id),aliases:combined})}if(app)for(const alias of aliases){const duplicate=all('apps').find(x=>x.name===alias&&x.status==='PLANNED'&&!x.coreModule);if(duplicate)put('apps',{...duplicate,status:'DISABLED',mergedInto:app.id})}}
 const categoryRules=[['学习服务','教学教务'],['行政服务','行政办公'],['教学服务','教学教务'],['学生服务','学工服务'],['图书服务','图书资源'],['生活服务','后勤生活'],['智慧服务','数字服务']];
@@ -95,3 +95,15 @@ for(const legacy of ['学习服务','生活服务','行政服务','教学服务'
 
 
 
+
+
+// Independent extension resources; initialize once without resetting live stock.
+tx(()=>{
+for(let i=1;i<=6;i++)if(!get('extensionBeds','bed'+i))put('extensionBeds',{id:'bed'+i,building:'演示一号宿舍楼',room:String(100+Math.ceil(i/2)),label:(i%2?'A':'B')+'床',name:'一号楼 '+(100+Math.ceil(i/2))+' '+(i%2?'A':'B')+'床',enabled:true});
+for(const [i,name,total] of [[1,'便携投影仪',3],[2,'活动相机',2],[3,'便携扩音器',4]])if(!get('extensionDevices','device'+i))put('extensionDevices',{id:'device'+i,name,description:'虚构校园公共设备，仅供本地借用演示',total,remaining:total,enabled:true});
+for(const [i,title] of [[1,'校园活动助理'],[2,'图书整理助理'],[3,'数字媒体实习生']])if(!get('extensionJobs','job'+i))put('extensionJobs',{id:'job'+i,title,employer:'演示校内服务中心',description:'虚构演示岗位，投递不向真实雇主发送资料，不形成录用承诺',deadline:new Date(Date.now()+30*86400000).toISOString(),enabled:true});
+if(!get('extensionSurveys','survey1'))put('extensionSurveys',{id:'survey1',title:'校园服务体验问卷',enabled:true,endsAt:new Date(Date.now()+30*86400000).toISOString(),questions:[{id:'q1',title:'你最常使用哪项校园服务？',options:['图书','食堂','打印','其他']},{id:'q2',title:'整体服务体验如何？',options:['满意','一般','待改进']}]});
+const mappings=[['housing','宿舍申请','住宿床位','申请住宿，查看床位分配并办理退宿','后勤生活'],['leaves','学生请假','学生请销假','填写起止日期，跟踪审批并登记返校销假','学工服务'],['parcels','快递服务','校园包裹','查看本人待取包裹，凭一次性取件码领取','后勤生活'],['equipment',null,'设备借用','预约公共设备，跟踪出借并办理归还','后勤生活'],['jobs',null,'校园招聘','浏览演示岗位，投递申请并查看处理进度','就业实习'],['surveys',null,'校园问卷','填写校园调查，运营仅查看匿名汇总结果','交流反馈']];
+for(const [module,legacyName,name,description,category] of mappings){let app=all('apps').find(x=>x.extensionModule===module);if(!app){app=legacyName?all('apps').find(x=>x.name===legacyName&&['PLANNED','DISABLED'].includes(x.status)):null;put('apps',{...app,id:app?.id||'extension-'+module,code:app?.code||'extension-'+module,name,description,category,status:'ACTIVE',extensionModule:module,internalPath:'/extensions/'+module,mergedInto:undefined,aliases:legacyName?[legacyName]:[],roles:app?.roles||[]})}}
+const affairs=all('apps').find(x=>x.coreModule==='affairs');if(affairs?.aliases?.some(x=>['学生请假','宿舍申请'].includes(x)))put('apps',{...affairs,aliases:affairs.aliases.filter(x=>!['学生请假','宿舍申请'].includes(x))});
+});

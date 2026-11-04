@@ -1,3 +1,5 @@
+import {extension} from './extension.mjs';
+import {utilities} from './utilities.mjs';
 import {campus} from './campus.mjs';
 import http from 'node:http';
 import {createHash,randomBytes} from 'node:crypto';
@@ -39,6 +41,8 @@ if(p.join('/')==='library/books')return send(listBooks());if(p[0]==='library'&&p
 if(p[0]==='me'&&['reservations','loans'].includes(p[1]))return send(all(p[1]).filter(o=>o.userId===u.id));
 let result;
 const mutation=async()=>{
+const extensionResult=extension(u,p,m,b,url,req.headers['idempotency-key']);if(extensionResult.handled)return extensionResult.data;
+const utilityResult=utilities(u,p,m,b,url,req.headers['idempotency-key']);if(utilityResult.handled)return utilityResult.data;
 const campusResult=campus(u,p,m,b,url,req.headers['idempotency-key']);if(campusResult.handled)return campusResult.data;
 if(p.join('/')==='files/sample'&&m==='GET'){const pdf=await PDFDocument.create();pdf.addPage().drawText('Campus service demo PDF - no personal data');res.writeHead(200,{'Content-Type':'application/pdf','Content-Disposition':'attachment; filename=campus-demo.pdf'});res.end(Buffer.from(await pdf.save()));return;}
 if(p.join('/')==='library/reservations'&&m==='POST')return tx(()=>reservation(u,b));
@@ -64,6 +68,7 @@ if(p[1]==='audit')return all('audit');if(p[1]==='organizations')return all('orga
 const key=req.headers['idempotency-key'];const isCreate=m==='POST'&&['library/reservations','printing/orders','dining/orders'].includes(p.join('/'));if(isCreate){const previous=createQueue;createQueue=new Promise(r=>releaseCreate=r);await previous;}if(isCreate&&key){need(typeof key==='string'&&key.length<=200);const rid=hash(`${u.id}:${p.join('/')}:${key}`),requestHash=hash(JSON.stringify(b)),prev=get('idempotency',rid);if(prev){if(prev.requestHash!==requestHash)fail(409,'幂等键内容冲突');return send(prev.response)}result=tx(()=>{const committed=get('idempotency',rid);if(committed){if(committed.requestHash!==requestHash)fail(409,'幂等键内容冲突');return committed.response}let created;if(p[0]==='library')created=reservation(u,b);else if(p[0]==='dining')created=dining(u,b);else created=put('printOrders',{id:id(),userId:u.id,fileId:b.fileId,pointId:b.pointId,status:'SUBMITTED',copies:b.copies,colorMode:b.colorMode,duplex:!!b.duplex,binding:b.binding,...quote(u,b),paymentMode:'OFFLINE',paymentStatus:'UNPAID'});put('idempotency',{id:rid,requestHash,response:created});return created})}else result=await mutation();if(!res.writableEnded)send(result);
 }catch(e){if(res.writableEnded)return;res.writeHead(e.status||500,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify({error:{code:`HTTP_${e.status||500}`,message:e.status?e.message:'服务器内部错误',requestId:id()}}));if(!e.status)console.error(e)}finally{releaseCreate?.()}}
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href)http.createServer(handler).listen(process.env.PORT||3000,'127.0.0.1',()=>console.log('Campus http://localhost:'+(process.env.PORT||3000)));
+
 
 
 

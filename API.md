@@ -68,3 +68,30 @@ Lost-item claimants can retain access to their related post after RETURNED/CLOSE
 `options.eventTypes`: 校园活动、志愿服务、竞赛报名. Event resource management accepts optional eventType; seed has a volunteer event and event4 creative challenge. Matching directory aliases are merged into the same functional module rather than counted as separately implemented external services.
 
 Existing demo database upgrades merge official aliases while preserving custom aliases, update descriptions only when they match prior seed defaults, and preserve user-customized descriptions. ACTIVE card descriptions explain user tasks rather than implementation details.
+
+## Six independent extensions
+Workflow structure was informed by public project descriptions for [CampusStay](https://github.com/Anilpanchal12/CampusStay) and [Hostel Administration System](https://github.com/vineeth34064/HOSTEL-ADMINISTRATION-SYSTEM). No third-party code or dependencies were copied. These are local demonstrations, not official school actions or real courier/employer integrations.
+
+GET `/extensions/:module` returns `{config,records,options,meta}`; GET `/:id` returns only the caller's record. POST root creates; POST `/:id/action` takes action. Admin paths prefix `/admin/extensions`. All records return allowedActions and a local-demo notice. Lists accept page/pageSize/q/status; pageSize defaults20, maximum100. All normal writes support Idempotency-Key with lookup, business changes and stored response in one transaction.
+
+| Module | User submission | Actions |
+|---|---|---|
+| housing | reason | SUBMITTED; operator allocate with bedId/reason → ALLOCATED, reject → REJECTED; user initial cancel; allocated checkout → CHECKED_OUT frees bed. One active application per user and one occupied record per bed. |
+| leaves | startDate,endDate YYYY-MM-DD,reason | SUBMITTED → operator approve/reject with reason; APPROVED → user return once leave starts, or user cancel before start. Inclusive overlaps with pending/approved requests rejected; maximum60 days. |
+| parcels | operator-only create recipientId,trackingNumber,carrier | PENDING_PICKUP → operator redeem with token → COLLECTED. Random credential appears only in owner's single-record detail, never operator responses or lists; credential valid once. |
+| equipment | deviceId,quantity integer1–5,purpose | REQUESTED atomically reserves stock; operator issue → ON_LOAN, return → RETURNED; user cancel or operator reject from REQUESTED restores stock once. |
+| jobs | jobId,motivation | SUBMITTED → review → REVIEWED → interview → INTERVIEW → accept/reject; operator can accept/reject from REVIEWED. User withdraw from any nonterminal application. Active duplicate applications rejected. |
+| surveys | surveyId,answers keyed by question ID | One answer per user/survey. Exact valid choice per question required. Operator endpoints expose aggregates only: `{surveyId,title,total,questions:[{id,title,counts:{choice:count}}]}`. No participant list or individual-answer endpoint. |
+
+Options keys: beds/devices/jobs/surveys; parcel admin additionally has recipients. Seeds: bed1–bed6, device1–device3, job1–job3, survey1 with q1 choices 图书/食堂/打印/其他 and q2 满意/一般/待改进.
+
+Resource management GET/POST `/admin/extensions/:module/options`, update by body.id and optional version:
+
+- housing: building,room,label,enabled. Duplicate physical bed coordinates rejected.
+- equipment: name,description,total,enabled. Total cannot drop below held/loaned quantity; remaining recalculated.
+- jobs: title,employer,description,deadline ISO,enabled.
+- surveys: title,questions array `{id,title,options:[strings]}`,endsAt ISO optional,enabled. 1–20 single-choice questions, 2–8 unique options per question. Once answered, questions cannot change.
+
+Survey anonymous answers and duplicate-participation markers are stored separately. Personal confirmation records contain no answers. Survey audit uses an anonymous actor and does not publish identifiable submission notifications; this is API-level aggregate privacy, not cryptographic anonymity against a database administrator. Other status changes audit and notify atomically.
+
+Student leave and housing application entries now route to these independent workflows; generic affairs no longer accepts new 学生请假/宿舍申请 submissions, but preserves historical records.
