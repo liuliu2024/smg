@@ -1,0 +1,75 @@
+import http from 'node:http';
+import {createHash,randomBytes} from 'node:crypto';
+import {readFile,writeFile,unlink} from 'node:fs/promises';
+import {resolve,extname} from 'node:path';
+import {pathToFileURL} from 'node:url';
+import {PDFDocument} from 'pdf-lib';
+import {all,get,put,del,id,now,tx} from './db.mjs';
+import {configuration,management,assignUser} from './configuration.mjs';
+import {fail,need,role,scope,audit,quote,reservation,reserveAction,dining,orderAction,runJobs} from './services.mjs';
+let createQueue=Promise.resolve();
+const hash=x=>createHash('sha256').update(x).digest('hex');
+const safeUser=u=>{const {id,displayName,campusId,roles,status,scope,activeRole}=u;return{id,displayName,campusId,roles,status,scope,activeRole}};
+const visible=(a,u)=>!a.roles?.length||a.roles.includes(u.activeRole);
+const appAccess=(code,u)=>{const a=get('apps',code);return a?.status==='ACTIVE'&&visible(a,u)};
+const published=(a,u)=>a.status==='PUBLISHED'&&(!a.expiresAt||a.expiresAt>now())&&(!a.targetRoles?.length||a.targetRoles.includes(u.activeRole));
+const listBooks=()=>all('books').map(b=>({...b,available:all('copies').filter(c=>c.bookId===b.id&&c.status==='AVAILABLE').length}));
+async function body(req){let chunks=[],size=0;for await(const c of req){size+=c.length;if(size>29*1024*1024)fail(413,'文件超过20MB');chunks.push(c)}try{return chunks.length?JSON.parse(Buffer.concat(chunks)):{} }catch{fail(422,'请求格式错误')}}
+export async function handler(req,res){const url=new URL(req.url,'http://localhost'),p=url.pathname.replace(/^\/api\/v1/,'').split('/').filter(Boolean),m=req.method;let releaseCreate;const send=(data,status=200)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify({data}))};try{
+if(url.pathname==='/health')return send({status:'ok',mode:process.env.APP_MODE||'demo'});
+if(!url.pathname.startsWith('/api/v1/')){let file=url.pathname==='/'?'index.html':url.pathname.slice(1);if(!extname(file))file='index.html';const target=resolve('public',file);if(!target.startsWith(resolve('public')+'/')&&!target.startsWith(resolve('public')+'\\'))fail(404,'不存在');try{const data=await readFile(target);res.writeHead(200,{'Content-Type':({'.html':'text/html; charset=utf-8','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml'}[extname(target)]||'application/octet-stream')});return res.end(data)}catch{fail(404,'不存在')}}
+if(!['GET','HEAD'].includes(m)){const expected=process.env.APP_ORIGIN||`http://localhost:${process.env.PORT||3000}`;if(req.headers.origin!==expected)fail(403,'请求来源不允许')}
+const b=['GET','HEAD'].includes(m)?{}:await body(req);
+if(p.join('/')==='auth/accounts'){if(process.env.APP_MODE==='production')fail(404,'演示登录已禁用');return send(all('users').filter(x=>!x.id.startsWith('demo-user')).map(safeUser))}
+if(p.join('/')==='auth/demo-login'&&m==='POST'){if(process.env.APP_MODE==='production')fail(404,'演示登录已禁用');const u=get('users',b.userId);need(u?.status==='ACTIVE','账号不可用');const token=randomBytes(32).toString('hex');put('sessions',{id:hash(token),userId:u.id,activeRole:u.roles[0],expiresAt:new Date(Date.now()+86400000).toISOString()});res.setHeader('Set-Cookie',`sid=${token}; Path=/; HttpOnly; SameSite=Lax${process.env.APP_MODE==='production'?'; Secure':''}`);return send({...safeUser(u),activeRole:u.roles[0]})}
+if(process.env.APP_MODE==='production')fail(503,'生产身份提供方尚未接入，业务操作已禁用');
+if(p[0]==='auth'&&['wecom','sso'].includes(p[1]))fail(503,'未接入真实身份系统');
+const sid=req.headers.cookie?.match(/(?:^|;\s*)sid=([^;]+)/)?.[1];const session=sid&&get('sessions',hash(sid));const user=session&&get('users',session.userId);if(!user||user.status!=='ACTIVE'||session.expiresAt<now())fail(401,'请先登录');if(!user.roles.includes(session.activeRole))fail(401,'角色已失效，请重新登录');const u={...user,activeRole:session.activeRole};
+if(p.join('/')==='auth/me')return send(safeUser(u));
+if(p.join('/')==='auth/logout'&&m==='POST'){del('sessions',session.id);res.setHeader('Set-Cookie','sid=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax');return send(true)}
+if(p.join('/')==='auth/role'&&m==='POST'){need(u.roles.includes(b.role),'角色未分配');put('sessions',{...session,activeRole:b.role});return send({...safeUser(u),activeRole:b.role})}
+if(['library','printing','dining'].includes(p[0])){const app=get('apps',p[0]);if(!app||app.status!=='ACTIVE'||(app.roles?.length&&!app.roles.includes(u.activeRole)))fail(403,'该应用当前不可用');}
+if(p[0]==='home')return send({announcements:all('announcements').filter(a=>published(a,u)),apps:all('apps').filter(a=>a.status==='ACTIVE'&&visible(a,u)),counts:{reservations:all('reservations').filter(o=>o.userId===u.id&&o.status==='READY').length,printing:all('printOrders').filter(o=>o.userId===u.id&&o.status==='READY').length,dining:all('diningOrders').filter(o=>o.userId===u.id&&o.status==='READY').length,unread:all('notifications').filter(o=>o.userId===u.id&&!o.readAt).length}});
+if(p[0]==='apps'){if(p[2]==='favorite'&&['PUT','DELETE'].includes(m)){need(get('apps',p[1]));if(m==='PUT')put('favorites',{id:`${u.id}:${p[1]}`,userId:u.id,appId:p[1]});else del('favorites',`${u.id}:${p[1]}`);return send(true)}return send(all('apps').filter(a=>visible(a,u)).map(a=>({...a,favorite:!!get('favorites',`${u.id}:${a.id}`)})))}
+if(p[0]==='search'){const q=url.searchParams.get('q')||'';return send({apps:all('apps').filter(a=>a.status==='ACTIVE'&&visible(a,u)&&a.name.includes(q)),books:appAccess('library',u)?listBooks().filter(a=>a.title.includes(q)):[],announcements:all('announcements').filter(a=>published(a,u)&&a.title.includes(q)),products:appAccess('dining',u)?all('products').filter(a=>a.active&&a.name.includes(q)):[]})}
+if(p[0]==='notifications'){if(m==='POST'){for(const n of all('notifications').filter(n=>n.userId===u.id&&(p[1]==='read-all'||n.id===p[1])))put('notifications',{...n,readAt:now()});return send(true)}return send(all('notifications').filter(n=>n.userId===u.id))}
+if(p.join('/')==='library/books')return send(listBooks());if(p[0]==='library'&&p[1]==='books'&&p[2])return send(listBooks().find(a=>a.id===p[2])||fail(404,'书目不存在'));
+if(p[0]==='me'&&['reservations','loans'].includes(p[1]))return send(all(p[1]).filter(o=>o.userId===u.id));
+let result;
+const mutation=async()=>{
+if(p.join('/')==='files/sample'&&m==='GET'){const pdf=await PDFDocument.create();pdf.addPage().drawText('Campus service demo PDF - no personal data');res.writeHead(200,{'Content-Type':'application/pdf','Content-Disposition':'attachment; filename=campus-demo.pdf'});res.end(Buffer.from(await pdf.save()));return;}
+if(p.join('/')==='library/reservations'&&m==='POST')return tx(()=>reservation(u,b));
+if(p[0]==='library'&&p[1]==='reservations'&&p[3]==='cancel'&&m==='POST')return tx(()=>reserveAction(u,get('reservations',p[2])||fail(404,'不存在'),'cancel'));
+if(p[0]==='library'&&p[1]==='loans'&&p[3]==='renew'&&m==='POST')return tx(()=>{const o=get('loans',p[2]);if(!o||o.userId!==u.id)fail(404,'不存在');if(o.status!=='ACTIVE'||o.renewalCount||o.dueAt<now()||all('reservations').some(r=>r.bookId===o.bookId&&['PENDING','READY'].includes(r.status)))fail(409,'不可续借');return put('loans',{...o,renewalCount:1,dueAt:new Date(new Date(o.dueAt).getTime()+14*86400000).toISOString()})});
+if(p[0]==='files'&&m==='POST'){need(typeof b.base64==='string'&&b.base64.length<=28*1024*1024);const bytes=Buffer.from(b.base64,'base64');need(bytes.length<=20*1024*1024&&bytes.subarray(0,5).toString()==='%PDF-','仅支持20MB以内PDF');let pdf;try{pdf=await PDFDocument.load(bytes)}catch{fail(422,'PDF无法解析或已加密')}const pageCount=pdf.getPageCount();need(pageCount>=1&&pageCount<=300,'PDF最多300页');const f={id:id(),ownerId:u.id,originalName:String(b.name||'document.pdf').slice(0,200),pageCount,size:bytes.length,expiresAt:new Date(Date.now()+(get('settings','fileRetentionDays')?.value||7)*86400000).toISOString()};await writeFile(`storage/${f.id}.pdf`,bytes);return put('files',f)}
+if(p[0]==='files'&&p[2]==='download'){const f=get('files',p[1]);if(!f||f.deletedAt)fail(404,'文件已删除');if(f.ownerId!==u.id&&!all('printOrders').some(o=>o.fileId===f.id&&u.activeRole==='PRINT_OPERATOR'&&u.scope.includes(o.pointId)))fail(404,'不存在');audit(u,'FILE_DOWNLOAD',f.id);res.writeHead(200,{'Content-Type':'application/pdf','Content-Disposition':'attachment; filename="document.pdf"'});res.end(await readFile(`storage/${f.id}.pdf`));return undefined}
+if(p.join('/')==='printing/points')return all('points');
+if(p.join('/')==='printing/quotes'&&m==='POST')return quote(u,b);
+if(p.join('/')==='printing/orders'&&m==='POST')return tx(()=>put('printOrders',{id:id(),userId:u.id,fileId:b.fileId,pointId:b.pointId,status:'SUBMITTED',copies:b.copies,colorMode:b.colorMode,duplex:!!b.duplex,binding:b.binding,...quote(u,b),paymentMode:'OFFLINE',paymentStatus:'UNPAID'}));
+if(p[0]==='dining'&&['halls','stalls'].includes(p[1])){if(p[1]==='halls')return all('halls');if(p[3]==='menu')return all('products').filter(x=>x.stallId===p[2]&&x.active);return p[2]?get('stalls',p[2]):all('stalls')}
+if(p.join('/')==='dining/orders'&&m==='POST')return tx(()=>dining(u,b));
+if(['printing','dining'].includes(p[0])&&p[1]==='orders'){const k=p[0]==='printing'?'printOrders':'diningOrders';if(!p[2])return all(k).filter(o=>o.userId===u.id);const o=get(k,p[2]);if(!o||o.userId!==u.id)fail(404,'不存在');if(p[3]==='cancel'&&m==='POST')return tx(()=>orderAction(u,o,'cancel',p[0],b));return o}
+if(p[0]==='admin'){
+const cfg=configuration(u,p,m,b);if(cfg.handled)return cfg.data;const mgmt=management(u,p,m,b);if(mgmt.handled)return mgmt.data;
+if(p[1]==='users'&&p[2]&&m==='POST'&&b.roles)return safeUser(assignUser(u,p[2],b));
+if(p[1]==='library'){role(u,['LIBRARIAN','SUPER_ADMIN']);const k=p[2];if(!['books','reservations','loans'].includes(k))fail(404,'资源不存在');if(k==='books'&&m==='POST')return tx(()=>{const old=p[3]?get('books',p[3]):null;if(p[3]&&!old)fail(404,'书目不存在');for(const key of ['title','author','publisher','isbn','category','location'])need(typeof b[key]==='string'&&b[key].trim().length>0&&b[key].length<=200,'请填写完整书目信息');const book=put('books',{...old,id:old?.id||id(),title:b.title,author:b.author,publisher:b.publisher,isbn:b.isbn,category:b.category,location:b.location});if(!old){need(Number.isInteger(b.copyCount)&&b.copyCount>=1&&b.copyCount<=20,'馆藏册数为1至20');for(let i=0;i<b.copyCount;i++)put('copies',{id:id(),bookId:book.id,status:'AVAILABLE',barcode:id()})}audit(u,'SAVE_BOOK',book.id);return book});if(!p[3])return k==='books'?listBooks():all(k);let o=get(k,p[3])||fail(404,'不存在');if(k==='reservations'&&m==='POST')return tx(()=>reserveAction(u,o,p[4]));if(k==='loans'&&p[4]==='return'&&m==='POST')return tx(()=>{o=get('loans',o.id);if(o.status!=='ACTIVE')fail(409,'已归还');put('copies',{...get('copies',o.copyId),status:'AVAILABLE'});audit(u,'RETURN',o.id);return put('loans',{...o,status:'RETURNED',returnedAt:now()})});}
+if(['printing','dining'].includes(p[1])){const d=p[1],k=d==='printing'?'printOrders':'diningOrders';role(u,d==='printing'?['PRINT_OPERATOR']:['CANTEEN_MERCHANT']);if(p[2]==='orders'){if(!p[3])return all(k).filter(o=>u.scope.includes(d==='printing'?o.pointId:o.stallId)).map(({pickupToken,...o})=>o);const o=get(k,p[3])||fail(404,'不存在');scope(u,o,d);if(m==='POST'){const outcome=tx(()=>orderAction(u,o,p[4],d,b));return {...outcome,pickupToken:undefined}};return {...o,pickupToken:undefined}}}
+role(u,['SUPER_ADMIN','CAMPUS_OPERATOR']);if(p[1]==='users'){role(u,['SUPER_ADMIN']);if(m==='GET')return all('users').map(safeUser);const o=get('users',p[2]);need(o);if(b.status==='DISABLED'&&o.roles.includes('SUPER_ADMIN')&&all('users').filter(x=>x.status==='ACTIVE'&&x.roles.includes('SUPER_ADMIN')).length<=1)fail(409,'不能禁用最后管理员');need(['ACTIVE','DISABLED'].includes(b.status));audit(u,'USER_STATUS',o.id);return put('users',{...o,status:b.status})}
+if(p[1]==='jobs'){if(m==='POST'){role(u,['SUPER_ADMIN']);for(const j of all('jobs').filter(j=>p[2]==='run'||j.id===p[2])){if(j.status!=='RUNNING')put('jobs',{...j,status:'PENDING',attempts:0,nextRunAt:now()})}return runJobs();}return all('jobs')}
+if(p[1]==='audit')return all('audit');if(p[1]==='organizations')return all('organizations');if(p[1]==='integrations')return ['SSO','WECOM','LIBRARY','PAYMENT','PRINTER'].map(provider=>({provider,status:'NOT_CONNECTED',mode:'DEMO',message:'未接入真实系统'}));if(!p[1])return {reservations:all('reservations').length,printing:all('printOrders').filter(x=>!['COMPLETED','CANCELLED','REJECTED'].includes(x.status)).length,dining:all('diningOrders').filter(x=>x.status==='SUBMITTED').length,failedJobs:all('jobs').filter(x=>x.status==='FAILED').length};
+}fail(404,'接口不存在')};
+const key=req.headers['idempotency-key'];const isCreate=m==='POST'&&['library/reservations','printing/orders','dining/orders'].includes(p.join('/'));if(isCreate){const previous=createQueue;createQueue=new Promise(r=>releaseCreate=r);await previous;}if(isCreate&&key){need(typeof key==='string'&&key.length<=200);const rid=hash(`${u.id}:${p.join('/')}:${key}`),requestHash=hash(JSON.stringify(b)),prev=get('idempotency',rid);if(prev){if(prev.requestHash!==requestHash)fail(409,'幂等键内容冲突');return send(prev.response)}result=tx(()=>{const committed=get('idempotency',rid);if(committed){if(committed.requestHash!==requestHash)fail(409,'幂等键内容冲突');return committed.response}let created;if(p[0]==='library')created=reservation(u,b);else if(p[0]==='dining')created=dining(u,b);else created=put('printOrders',{id:id(),userId:u.id,fileId:b.fileId,pointId:b.pointId,status:'SUBMITTED',copies:b.copies,colorMode:b.colorMode,duplex:!!b.duplex,binding:b.binding,...quote(u,b),paymentMode:'OFFLINE',paymentStatus:'UNPAID'});put('idempotency',{id:rid,requestHash,response:created});return created})}else result=await mutation();if(!res.writableEnded)send(result);
+}catch(e){if(res.writableEnded)return;res.writeHead(e.status||500,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify({error:{code:`HTTP_${e.status||500}`,message:e.status?e.message:'服务器内部错误',requestId:id()}}));if(!e.status)console.error(e)}finally{releaseCreate?.()}}
+if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href)http.createServer(handler).listen(process.env.PORT||3000,'127.0.0.1',()=>console.log('Campus http://localhost:'+(process.env.PORT||3000)));
+
+
+
+
+
+
+
+
+
+
+
+
