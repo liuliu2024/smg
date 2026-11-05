@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: campus_foundation
+      POSTGRES_USER: campus_foundation
+      POSTGRES_PASSWORD: ${FOUNDATION_POSTGRES_PASSWORD:?Set a unique demo PostgreSQL password}
+    ports:
+      - '127.0.0.1:55432:5432'
+    volumes:
+      - foundation_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U campus_foundation -d campus_foundation']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+volumes:
+  foundation_pg: {}
