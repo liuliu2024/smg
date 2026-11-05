@@ -2,7 +2,7 @@ name: Campus platform checks
 on:
   pull_request:
   push:
-    branches: [feat/campus-p0]
+    branches: [feat/campus-p0, feat/campus-v3-m1]
   workflow_dispatch:
 jobs:
   acceptance:
@@ -17,3 +17,14 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      - run: npx playwright install --with-deps chrome
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-acceptance
+          path: |
+            playwright-report/
+            test-results/
+            artifacts/screenshots/
+          retention-days: 7

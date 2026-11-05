@@ -1,0 +1,14 @@
+import {randomBytes,createHash,createCipheriv,createDecipheriv} from 'node:crypto';
+import {readFileSync,writeFileSync,mkdirSync,existsSync} from 'node:fs';
+import {dirname,resolve,join} from 'node:path';
+import {db,now} from './db.mjs';
+db.exec(`CREATE TABLE IF NOT EXISTS v3_pickup_credentials(domain TEXT NOT NULL,order_id TEXT NOT NULL,token_hash TEXT NOT NULL UNIQUE,ciphertext TEXT NOT NULL,created_at TEXT NOT NULL,used_at TEXT,PRIMARY KEY(domain,order_id));`);
+const reject=(message,status=409)=>{throw Object.assign(new Error(message),{status})};
+export const credentialHash=s=>createHash('sha256').update(s).digest('hex');
+let key;
+function encryptionKey(){if(key)return key;const v=process.env.CREDENTIAL_ENCRYPTION_KEY;if(v){key=/^[a-fA-F0-9]{64}$/.test(v)?Buffer.from(v,'hex'):Buffer.from(v,'base64');if(key.length!==32)reject('凭证加密密钥须为32字节',503);return key}if(process.env.APP_MODE==='production')reject('生产凭证加密密钥未配置',503);const dir=dirname(resolve(process.env.DB_PATH||'storage/campus.db'));mkdirSync(dir,{recursive:true});const path=join(dir,'.demo-credential-key');if(!existsSync(path))try{writeFileSync(path,randomBytes(32),{flag:'wx',mode:0o600})}catch(e){if(e.code!=='EEXIST')throw e}key=readFileSync(path);if(key.length!==32)reject('演示凭证密钥损坏',503);return key}
+function encrypt(token){const iv=randomBytes(12),cipher=createCipheriv('aes-256-gcm',encryptionKey(),iv);return Buffer.concat([iv,cipher.update(token,'utf8'),cipher.final(),cipher.getAuthTag()]).toString('base64')}
+export function credentialToken(record){if(!record||record.used_at)reject('凭证已失效');const b=Buffer.from(record.ciphertext,'base64'),d=createDecipheriv('aes-256-gcm',encryptionKey(),b.subarray(0,12));d.setAuthTag(b.subarray(-16));return Buffer.concat([d.update(b.subarray(12,-16)),d.final()]).toString('utf8')}
+export function credentialFor(domain,orderId,legacyToken){let c=db.prepare('SELECT * FROM v3_pickup_credentials WHERE domain=? AND order_id=?').get(domain,orderId);if(!c){const token=legacyToken||randomBytes(32).toString('hex');db.prepare('INSERT INTO v3_pickup_credentials VALUES(?,?,?,?,?,NULL)').run(domain,orderId,credentialHash(token),encrypt(token),now());c=db.prepare('SELECT * FROM v3_pickup_credentials WHERE domain=? AND order_id=?').get(domain,orderId)}return c}
+export function consumeCredential(domain,orderId,token){if(typeof token!=='string'||token.length>256)reject('凭证无效');const c=db.prepare('SELECT * FROM v3_pickup_credentials WHERE domain=? AND order_id=?').get(domain,orderId);if(!c||c.used_at||credentialHash(token)!==c.token_hash)reject('凭证无效或已使用');if(db.prepare('UPDATE v3_pickup_credentials SET used_at=? WHERE domain=? AND order_id=? AND used_at IS NULL').run(now(),domain,orderId).changes!==1)reject('凭证已使用')}
+export function invalidateCredential(domain,orderId){db.prepare('UPDATE v3_pickup_credentials SET used_at=COALESCE(used_at,?) WHERE domain=? AND order_id=?').run(now(),domain,orderId)}

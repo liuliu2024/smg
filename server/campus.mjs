@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import {all,get,put,id,now,tx} from './db.mjs';
 import {fail,need,role,audit,notify} from './services.mjs';
+import {hasScope} from './auth-v3.mjs';
 const affairTypes=['印章申请','差旅申请','教室借用','行政事项','学生证补办','档案转递','补考报名','重修申请'];
 const eventTypes=['校园活动','志愿服务','竞赛报名'];
 const definitions={
@@ -14,7 +15,7 @@ marketplace:{name:'校园二手',fields:['title','description','priceCents','cat
 affairs:{name:'办事申请',fields:['type','title','description'],initial:'SUBMITTED',transitions:{approve:['SUBMITTED','APPROVED'],reject:['SUBMITTED','REJECTED']}}
 };
 const kind=m=>'campus:'+m;
-const operator=u=>['SUPER_ADMIN','CAMPUS_OPERATOR'].includes(u.activeRole);
+function authorizeStaff(u,module){const expected=['venues','activities'].includes(module)?'RESOURCE_MANAGER':['certificates','affairs'].includes(module)?'DEPARTMENT_REVIEWER':'SERVICE_AGENT';role(u,[expected]);if(!hasScope(u,'SERVICE',module))fail(403,'未分配此服务的业务范围')}
 const text=(v,max=2000)=>{need(typeof v==='string'&&v.trim().length>0&&v.length<=max,'请填写有效文本');return v.trim()};
 const take=(b,fields)=>Object.fromEntries(fields.map(f=>[f,f==='priceCents'?b[f]:text(b[f],f==='description'?3000:200)]));
 const allowedActions=(u,module,o,admin=false)=>{if(admin){let ops=Object.entries(definitions[module].transitions||{}).filter(([,t])=>t[0]===o.status).map(([a])=>a);if((module==='venues'&&o.status==='CONFIRMED'||module==='activities'&&o.status==='REGISTERED')&&o.startsAt>now())ops.push('cancel');if(module==='lost'&&['OPEN','CLAIM_PENDING'].includes(o.status))ops.push('close');if(module==='lost'&&o.status==='CLAIM_PENDING')ops.push('confirm-return');if(module==='marketplace'&&o.status==='ACTIVE')ops.push('withdraw');return ops}const own=o.userId===u.id;let actions=[];if(own){if(({repairs:['SUBMITTED'],venues:['CONFIRMED'],activities:['REGISTERED'],feedback:['SUBMITTED'],certificates:['SUBMITTED'],affairs:['SUBMITTED']}[module]||[]).includes(o.status))actions.push('cancel');if(['repairs','feedback'].includes(module)&&o.status==='RESOLVED')actions.push('close');if(module==='lost'&&['OPEN','CLAIM_PENDING'].includes(o.status))actions.push('close');if(module==='lost'&&o.status==='CLAIM_PENDING')actions.push('confirm-return');if(module==='marketplace'&&o.status==='ACTIVE')actions.push('sold','withdraw')}else if(module==='lost'&&['OPEN','CLAIM_PENDING'].includes(o.status)&&!all('campusClaims').some(c=>c.postId===o.id&&c.userId===u.id&&c.status==='PENDING'))actions.push('claim');if(['venues','activities'].includes(module)&&o.startsAt<=now())actions=actions.filter(a=>a!=='cancel');return actions};
@@ -22,7 +23,7 @@ const visible=(u,module,o,admin=false)=>{if(['lost','marketplace'].includes(modu
 const message=(u,module,o,status)=>{audit(u,'CAMPUS_'+module+'_'+status,o.id);notify(o.userId,definitions[module].name+'：'+status,'/services/'+module,'campus:'+module+':'+o.id+':'+status)};
 const options=(admin=false)=>({venues:all('campusVenues').filter(x=>admin||x.enabled),events:all('campusEvents').filter(x=>admin||x.enabled&&x.startsAt>now()),affairTypes,eventTypes,slots:['09:00','10:00','14:00','15:00','19:00']});
 export function campus(u,p,m,b,url,key){
-const admin=p[0]==='admin'&&p[1]==='services';if(!(p[0]==='services'||admin))return {handled:false};const module=p[admin?2:1],rid=p[admin?3:2],operation=p[admin?4:3];const definition=definitions[module];if(!definition)fail(404,'校园服务不存在');if(admin)role(u,['SUPER_ADMIN','CAMPUS_OPERATOR']);else{const app=all('apps').find(a=>a.coreModule===module);if(!app||app.status!=='ACTIVE'||app.roles?.length&&!app.roles.includes(u.activeRole))fail(403,'该应用当前不可用');if(!['STUDENT','TEACHER','LIBRARIAN','PRINT_OPERATOR','CANTEEN_MERCHANT','CAMPUS_OPERATOR','SUPER_ADMIN'].includes(u.activeRole)&&!get('roles',u.activeRole)?.permissions?.includes('VIEW_PORTAL'))fail(403,'当前角色不允许使用校园服务')}
+const admin=p[0]==='admin'&&p[1]==='services';if(!(p[0]==='services'||admin))return {handled:false};const module=p[admin?2:1],rid=p[admin?3:2],operation=p[admin?4:3];const definition=definitions[module];if(!definition)fail(404,'校园服务不存在');if(admin)authorizeStaff(u,module);else{const app=all('apps').find(a=>a.coreModule===module);if(!app||app.status!=='ACTIVE'||app.roles?.length&&!app.roles.includes(u.activeRole))fail(403,'该应用当前不可用');if(!['STUDENT','TEACHER','LIBRARIAN','PRINT_OPERATOR','CANTEEN_MERCHANT','CAMPUS_OPERATOR','SERVICE_AGENT','RESOURCE_MANAGER','DEPARTMENT_REVIEWER','SUPER_ADMIN'].includes(u.activeRole)&&!get('roles',u.activeRole)?.permissions?.includes('VIEW_PORTAL'))fail(403,'当前角色不允许使用校园服务')}
 if(admin&&rid==='options'&&['venues','activities'].includes(module)){
 const resource=module==='venues'?'campusVenues':'campusEvents';if(m==='GET')return {handled:true,data:{config:{module,name:definition.name+'资源配置'},records:all(resource),options:options(true)}};need(m==='POST','仅支持GET/POST');return {handled:true,data:tx(()=>{const previous=b.id?get(resource,b.id):null;if(b.id&&!previous)fail(404,'资源不存在');need(Number.isInteger(b.capacity)&&b.capacity>=1&&b.capacity<=10000,'容量须为1至10000');need(typeof b.enabled==='boolean','请明确开关');let entry={...previous,id:previous?.id||id(),name:text(b.name,100),location:text(b.location,200),capacity:b.capacity,enabled:b.enabled};if(module==='activities'){need(typeof b.startsAt==='string'&&!Number.isNaN(Date.parse(b.startsAt))&&new Date(b.startsAt)>new Date(),'活动时间必须在未来');const enrolled=all(kind('activities')).filter(x=>x.eventId===entry.id&&x.status==='REGISTERED').length;if(enrolled>b.capacity)fail(409,'容量不能低于已报名人数');if(enrolled&&previous.startsAt!==new Date(b.startsAt).toISOString())fail(409,'已有报名不可改变活动时间');need(!b.eventType||eventTypes.includes(b.eventType),'活动类型无效');entry={...entry,eventType:b.eventType||previous?.eventType||'校园活动',description:text(b.description,2000),startsAt:new Date(b.startsAt).toISOString(),remaining:b.capacity-enrolled}}put(resource,entry);audit(u,'SAVE_'+resource,entry.id);return entry})}}
 if(m==='GET'){
@@ -55,20 +56,9 @@ need(admin||o.userId===u.id,'仅发布者可操作');if(o.status!=='ACTIVE')fail
 }else if(['repairs','feedback'].includes(module)&&action==='close'&&!admin){
 need(o.userId===u.id,'仅本人确认');if(o.status!=='RESOLVED')fail(409,'仅已解决事项可确认');o.status='CLOSED';
 }else{
-role(u,['SUPER_ADMIN','CAMPUS_OPERATOR']);const transition=definition.transitions?.[action];if(!transition||o.status!==transition[0])fail(409,'状态流转不允许');o.response=text(b.reason,2000);o.handledBy=u.id;o.handledAt=now();o.status=transition[1];if(module==='certificates'&&o.status==='APPROVED')o.referenceNumber='DEMO-'+o.id.slice(0,8).toUpperCase();
+authorizeStaff(u,module);const transition=definition.transitions?.[action];if(!transition||o.status!==transition[0])fail(409,'状态流转不允许');o.response=text(b.reason,2000);o.handledBy=u.id;o.handledAt=now();o.status=transition[1];if(module==='certificates'&&o.status==='APPROVED')o.referenceNumber='DEMO-'+o.id.slice(0,8).toUpperCase();
 }
 put(kind(module),o);message(u,module,o,o.status);return visible(u,module,o,admin);
 };
 const response=tx(()=>{if(!key)return execute();need(typeof key==='string'&&key.length<=200,'幂等键无效');const requestHash=createHash('sha256').update(JSON.stringify({m,p,b})).digest('hex');const kid='campus:'+u.id+':'+p.join('/')+':'+key;const prior=get('idempotency',kid);if(prior){if(prior.requestHash!==requestHash)fail(409,'幂等键内容冲突');return prior.response}const result=execute();put('idempotency',{id:kid,requestHash,response:result});return result});return {handled:true,data:response};
 }
-
-
-
-
-
-
-
-
-
-
-

@@ -1,3 +1,4 @@
+import {fixtureFetch} from './v3-fixtures.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -13,7 +14,7 @@ const {get,put,all,db}=await import('../server/db.mjs');
 const server=http.createServer(handler);
 await new Promise(r=>server.listen(3199,'127.0.0.1',r));
 const cookies={};
-async function req(user,path,method='GET',body,key){const r=await fetch('http://127.0.0.1:3199/api/v1/'+path,{method,headers:{Origin:process.env.APP_ORIGIN,'Content-Type':'application/json',...(cookies[user]?{Cookie:cookies[user]}:{}),...(key?{'Idempotency-Key':key}:{})},body:body===undefined?undefined:JSON.stringify(body)});const json=await r.json();return {status:r.status,data:json.data,error:json.error,headers:r.headers};}
+async function req(user,path,method='GET',body,key){const r=await fixtureFetch('http://127.0.0.1:3199/api/v1/'+path,{method,headers:{Origin:process.env.APP_ORIGIN,'Content-Type':'application/json',...(cookies[user]?{Cookie:cookies[user]}:{}),...(key?{'Idempotency-Key':key}:{})},body:body===undefined?undefined:JSON.stringify(body)});const json=await r.json();return {status:r.status,data:json.data,error:json.error,headers:r.headers};}
 async function login(user){const r=await req(user,'auth/demo-login','POST',{userId:user});assert.equal(r.status,200);cookies[user]=r.headers.get('set-cookie').split(';')[0];}
 const ok=r=>{assert.equal(r.status,200,JSON.stringify(r));return r.data};
 await test('P0 HTTP/service acceptance',async t=>{try{
@@ -22,7 +23,7 @@ await t.test('login cookie and home',async()=>{const r=await req('student','auth
 await t.test('favorite persistence and isolation',async()=>{ok(await req('student','apps/library/favorite','PUT',{}));assert.equal(ok(await req('student','apps')).find(x=>x.id==='library').favorite,true);assert.equal(ok(await req('student2','apps')).find(x=>x.id==='library').favorite,false);});
 await t.test('normal user cannot call admin',async()=>assert.equal((await req('student','admin/users')).status,403));
 await t.test('library resource name injection rejected',async()=>{for(const resource of ['sessions','files','printOrders','users'])assert.equal((await req('librarian',`admin/library/${resource}`)).status,404);});
-await t.test('invalid Origin rejected',async()=>{const r=await fetch('http://127.0.0.1:3199/api/v1/auth/logout',{method:'POST',headers:{Origin:'https://evil.example',Cookie:cookies.student}});assert.equal(r.status,403)});
+await t.test('invalid Origin rejected',async()=>{const r=await fixtureFetch('http://127.0.0.1:3199/api/v1/auth/logout',{method:'POST',headers:{Origin:'https://evil.example',Cookie:cookies.student}});assert.equal(r.status,403)});
 let reservation;
 await t.test('reservation idempotency and conflict',async()=>{const a=await req('student','library/reservations','POST',{bookId:'book1'},'reservation1');reservation=ok(a);const b=ok(await req('student','library/reservations','POST',{bookId:'book1'},'reservation1'));assert.equal(b.id,reservation.id);assert.equal((await req('student','library/reservations','POST',{bookId:'book2'},'reservation1')).status,409)});
 await t.test('library ready fulfill loan return',async()=>{ok(await req('librarian',`admin/library/reservations/${reservation.id}/ready`,'POST',{}));ok(await req('librarian',`admin/library/reservations/${reservation.id}/fulfill`,'POST',{}));const loan=ok(await req('student','me/loans')).find(x=>x.reservationId===reservation.id);assert.ok(loan);ok(await req('librarian',`admin/library/loans/${loan.id}/return`,'POST',{}));assert.equal(get('copies',reservation.copyId).status,'AVAILABLE')});
@@ -44,4 +45,3 @@ await t.test('read all notifications consistency',async()=>{ok(await req('studen
 await t.test('disable invalidates old session last admin protected',async()=>{ok(await req('admin','admin/users/student2','POST',{status:'DISABLED'}));assert.equal((await req('student2','auth/me')).status,401);assert.equal((await req('admin','admin/users/admin','POST',{status:'DISABLED'})).status,409)});
 await t.test('production demo auth forbidden',async()=>{process.env.APP_MODE='production';assert.equal((await req('student','auth/demo-login','POST',{userId:'student'})).status,404);process.env.APP_MODE='demo'});
 }finally{await new Promise(r=>server.close(r));db.close();}});
-

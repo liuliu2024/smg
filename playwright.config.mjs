@@ -1,0 +1,3 @@
+import{defineConfig}from'@playwright/test';import{mkdtempSync}from'node:fs';import{tmpdir}from'node:os';import{join}from'node:path';
+const dir=mkdtempSync(join(tmpdir(),'campus-e2e-'));
+export default defineConfig({testDir:'./tests/e2e',testMatch:'**/*.spec.mjs',workers:1,use:{baseURL:'http://localhost:3999',channel:'chrome',headless:true,extraHTTPHeaders:{Origin:'http://localhost:3999'}},webServer:{command:'node server/main.mjs',url:'http://localhost:3999/health',reuseExistingServer:false,timeout:30000,env:{DB_PATH:join(dir,'e2e.db'),PORT:'3999',APP_ORIGIN:'http://localhost:3999',APP_MODE:'demo'}},reporter:[['list'],['html',{open:'never'}]]});
