@@ -1,0 +1,29 @@
+{
+  "name": "campus-services",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env server/dev.mjs",
+    "start": "node --env-file-if-exists=.env server/dev.mjs --production",
+    "worker": "node --env-file-if-exists=.env server/worker.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "build": "next build",
+    "start:standalone": "node --env-file-if-exists=.env server/main.mjs",
+    "test:ui": "node scripts/ui-check.mjs"
+  },
+  "dependencies": {
+    "lucide-static": "1.68.0",
+    "next": "16.4.5",
+    "pdf-lib": "1.17.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1"
+  }
+}

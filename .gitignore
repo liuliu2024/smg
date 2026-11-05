@@ -1,0 +1,10 @@
+node_modules/
+.next/
+storage/
+.env
+*.db
+*.db-shm
+*.db-wal
+test-results/
+playwright-report/
+artifacts/
