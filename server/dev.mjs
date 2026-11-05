@@ -6,10 +6,12 @@ const app=next({dev:!process.argv.includes('--production')});
 await app.prepare();
 const nextHandler=app.getRequestHandler();
 const worker=spawn(process.execPath,['server/worker.mjs'],{stdio:'inherit',env:process.env});
+const foundationWorker=process.env.DATABASE_URL&&process.env.APP_MODE==='demo'&&!process.argv.includes('--web-only')
+  ?spawn(process.execPath,['foundation/worker.mjs'],{stdio:'inherit',env:process.env,windowsHide:true})
+  :null;
 const server=createServer((req,res)=>{
- if(req.url.startsWith('/api/')||req.url==='/health') return Promise.resolve(handler(req,res)).catch(()=>{if(!res.headersSent)res.writeHead(500);res.end('Internal error');});
+ if(req.url.startsWith('/api/')||req.url==='/health'||/^\/foundation\/?(?:\?|$)/.test(req.url)) return Promise.resolve(handler(req,res)).catch(()=>{if(!res.headersSent)res.writeHead(500);res.end('Internal error');});
  return nextHandler(req,res);
 });
 server.listen(Number(process.env.PORT||3000),'127.0.0.1',()=>console.log('Campus services: http://localhost:'+ (process.env.PORT||3000)));
-for(const signal of ['SIGTERM','SIGINT'])process.on(signal,()=>{worker.kill();server.close(()=>process.exit());});
-
+for(const signal of ['SIGTERM','SIGINT'])process.on(signal,()=>{worker.kill();foundationWorker?.kill();server.close(()=>process.exit());});
