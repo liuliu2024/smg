@@ -1,79 +1,83 @@
 # 校园服务平台
 
-云栖职业技术学院（演示名称）的本地校园服务平台。包含门户、移动页面、管理后台及图书、打印、食堂业务。仅使用虚构身份，不产生真实收费或外部通知。
+云栖职业技术学院为演示名称，身份与学校业务均为虚构。本地可运行门户、手机页面、管理后台及图书、打印、餐饮核心闭环；用户上传的v3.0规格为最新合同。当前为v3 M1实施版，不能称F01—F80全部开发或验收完成。逐项状态见 [V3_FEATURE_STATUS.md](V3_FEATURE_STATUS.md)。
 
-## 启动
+## 启动与检查
 
-要求 Node.js 24 LTS、npm。首次执行：
+要求Node.js 24 LTS与npm，在仓库目录执行：
 
 ```powershell
 npm ci
+Copy-Item .env.example .env
+npm run db:migrate
+npm run db:seed
 npm run dev
 ```
 
-浏览器打开 http://localhost:3000 。命令同时启动 Next.js Web 和每60秒运行的数据库任务 worker。使用 localhost，不要改用127.0.0.1（修改请求需要匹配Origin）。如改端口，同时配置PORT与APP_ORIGIN。可复制.env.example为.env；启动脚本使用Node24加载该文件，进程已有环境变量优先。
+已有.env时保留已有设置。打开 http://localhost:3000 。dev同时启动Next.js与每60秒运行的worker；start同样启动worker，不必再双开。修改端口时同步PORT、APP_ORIGIN；修改请求校验Origin，使用localhost。当前Web只监听本机127.0.0.1，未部署公网。
 
-首次导入服务端会创建 storage/campus.db 和幂等演示数据；不会在每次启动清空数据库。SQLite迁移以 CREATE TABLE IF NOT EXISTS 执行，当前为通用JSON记录模型，非规格要求的Prisma关系迁移。
-
-正式构建和本地预览：
-
-```powershell
-npm run build
-npm start
-```
-
-直接运行轻量HTTP服务：npm run start:standalone。独立任务：npm run worker；单次任务：node server/worker.mjs --once。管理后台也可运行一次任务。生产模式APP_MODE=production会拒绝演示登录和业务操作，真实认证尚未接入。
-
-## 演示身份
-
-登录页选身份，不需要密码。student/林知夏、student2/周予安、librarian/图书馆员、printer/打印操作员、merchant/食堂商户、admin/超级管理员、operator/校园运营。printer2与merchant2用于业务范围隔离验收。以登录页实际精选列表为准。
-
-图书：学生预约，馆员确认待取、领取和归还。打印：下载页面内置PDF样例，上传、报价、提交；打印员接单、处理、待取、确认到店付款、输入本人凭证核销。食堂：选择下一开放时段下单；商户接单、备餐、待取、确认付款和核销。凭证仅订单本人在READY状态可见。
-
-## 检查
+首次导入服务端会幂等创建/迁移数据库并补演示种子；db:migrate当前也包含bootstrap/seed，不能当作纯DDL生产迁移工具。启动不清空现有数据库。
 
 ```powershell
 npm test
 npm run build
-npm run test:ui
+npm start
 ```
 
-test:ui要求本机Chrome及已启动的localhost:3000服务；截图输出到工作区outputs/screenshots（脚本可按使用位置调整）。HTTP测试使用临时数据库；不会清空演示库。真实执行结果见TEST_REPORT.md，审查见QC_REPORT.md。
+浏览器测试：`npm run test:e2e`，配置会启动隔离测试服务，要求可用的本机Chrome。`npm run test:ui`是另一个截图检查脚本，要求先启动localhost:3000，默认输出artifacts/screenshots，支持SCREENSHOT_DIR。
+
+最新记录104项服务测试通过、0失败；Playwright最近3项通过：2项核心浏览器上下文API/布局检查，另1项真实390手机点击学生登录、餐单/模拟付款/反馈，商户独立上下文回复解决，学生刷新查处理记录。构建通过。这些数字不是功能完成数，详见 [TEST_REPORT.md](TEST_REPORT.md)。
+
+独立运行：`npm run start:standalone`为轻量HTTP服务，不替代Next页面宿主；`npm run worker`可单独部署任务；`node server/worker.mjs --once`单次执行任务。管理后台也支持任务排队/核实。
+
+## 页面与账号
+
+`/`是角色化任务首页，`/apps`是参考图所需的分类密集卡片墙，支持分类、搜索、收藏、最近使用。桌面224px侧栏、64px顶栏、24px间距、最大1600px内容区；平板收为图标栏，手机显示底部导航，后台入口末位。规划卡明确标记，不计为已开发功能。
+
+`/me/services`、`/tasks`、`/calendar`聚合本人真实源业务；私人记事工具另在/utilities，不冒充业务待办。图标为Lucide SVG并保留许可。网页为企业微信承载的H5与独立预览，原生客户端栏由企业微信提供。
+
+登录页10类角色、18个稳定逻辑演示账号，无生产密码：
+
+| 逻辑账号 | 兼容别名 | 角色/用途 |
+|---|---|---|
+| demo_admin | admin | 超管配置、授权、审计、连接健康 |
+| demo_operator | operator | 门户运营、匿名汇总 |
+| demo_student_01 / 02 | student / student2 | 本人业务及隔离 |
+| demo_teacher_01 | teacher | 教师本人服务 |
+| demo_librarian_01 / 02 | librarian / librarian2 | 授权图书范围 |
+| demo_print_01 / 02 | printer / printer2 | 各自打印点 |
+| demo_merchant_01 / 02 / 03 | merchant / merchant2 / merchant3 | 各自档口 |
+| demo_multi_01 | multi | 教师+馆员，单活动角色 |
+| demo_disabled_01 | disabled | 停用，登录拒绝 |
+| demo_unassigned_01 | unassigned | 无角色，待授权 |
+| demo_agent_01 | agent | 服务专员，指定服务 |
+| demo_resource_01 | resource-manager | 资源管理员，指定服务 |
+| demo_reviewer_01 | reviewer | 部门审核员，指定服务 |
+
+会话8小时，多会话独立，角色权限不求并集；禁用/角色撤销/scope变更下一请求生效。超管/运营没有默认敏感业务万能处理权，B演示使用后三岗位，目前主要SERVICE范围。完整边界见 [PERMISSIONS.md](PERMISSIONS.md)。
+
+演示：学生预约图书，馆员确认待取/领取/归还；学生上传PDF、获得10分钟报价并下单，打印员接单/处理/待取、付款确认/核销；学生选今天或明天餐段下单，商户备餐/待取/核销，学生提交订单反馈。凭证仅本人待取订单可见。付款为线下人工记录或模拟，未接真实支付。
 
 ## 数据与恢复
 
-数据和PDF在storage，文件不通过静态目录提供。备份前停止Web与worker，将整个storage目录复制到安全位置；恢复时同样停止服务后替换目录。SQLite WAL运行中不可只复制主db文件。重置必须停止Web和worker并备份，然后显式执行node server/reset-demo.mjs --confirm=RESET_DEMO；拒绝production和storage目录外数据库。
+SQLite与PDF位于storage，PDF走鉴权下载。核心用户/组织/会话、门户、图书、打印、餐饮、通知/任务/审计/幂等/付款已独立typed迁移；报价/凭证/指南/打印规则/反馈/outbox/连接治理有独立表。旧核心迁移archive保留恢复证据。
 
-## 限制
+校园/扩展/工具B域仍为legacy JSON records，不满足v3全域关系模型。每商品仅一个默认规格；规则执行器目前只支持打印费率。见 [DATA_DICTIONARY.md](DATA_DICTIONARY.md)、[IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md)。
 
-本版是可运行演示，不能视为全部P0验收通过。技术栈、页面和数据模型差异见IMPLEMENTATION_NOTES.md与QC_REPORT.md。真实身份、企微、图书馆、打印设备、支付、恶意文件扫描、生产容量验证均未接入或未执行。不可用于5000人生产并发承诺。未部署公网。
+演示凭证密钥为DB目录的.demo-credential-key，须随库备份；生产必须安全配置CREDENTIAL_ENCRYPTION_KEY为32字节hex或base64，不得写入仓库/聊天。.env.example仅基础本地配置，不是完整生产模板。APP_MODE=production拒绝演示登录/未接真实认证业务，当前不能仅改变量上线。
 
-## 企业微信承载与参考图
+备份/恢复前停Web与worker，复制整个storage及实际DB目录和密钥；SQLite运行中不能只复制主库遗漏WAL。需重置时先停服务并备份：
 
-主入口按用户提供的企业微信工作台截图实现：约134px网页导航、90px顶部区域、八列紧凑卡片、分类/搜索/收藏。网页导航是独立预览的演示导航；企业微信客户端原生栏由企业微信提供。图标使用Lucide官方SVG并附许可证，未复制第三方应用品牌标识。
+```powershell
+npm run demo:reset -- --confirm=RESET_DEMO
+```
 
-真实企业微信接入需要学校提供企业ID、应用AgentID、经批准的回调域名与应用可见范围、成员标识映射，以及通过安全渠道配置的应用密钥。不要把密钥写进仓库、Notion或聊天。当前入口明确返回未接入，不模拟OAuth成功。
+此操作删除演示数据并重新seed，拒绝production与storage外数据库。测试强制DB_PATH隔离；曾一次导入顺序误写默认演示库，现已备份/精准清理并增加开库前防护，见TEST_REPORT；物理测试PDF存储仍未全部隔离。
 
-重置演示：先停止Web与worker并备份storage，再执行 node server/reset-demo.mjs --confirm=RESET_DEMO。production和storage目录之外的数据库会拒绝重置。
+## 企业微信与剩余边界
 
-浏览器验收脚本默认保存artifacts/screenshots，支持SCREENSHOT_DIR指定路径；需要Chrome及已启动服务。首次浏览器截图旧版为门户，新版企业微信工作台检查以design-qa.md为准。
+连接配置支持DEMO/MANUAL/TEST/LIVE，但测试只验证本地配置，明确connected=false。企业微信、统一身份、图书馆、设备、真实支付和教学平台均未真实接通。
 
+正式接入需学校管理员创建/授权自建应用，提供CorpID/AgentID、可见范围、正式HTTPS域名、可信域名/可信IP、成员映射，并安全配置Secret。不得把密钥写入仓库、Notion或聊天。测试企业/沙箱账号可用性需在届时官方后台验证，未宣称“虚拟企业微信”已可上线。
 
-## 新增可用服务
-
-在既有图书、打印、食堂基础上，新增校园报修、场地预约、失物招领、活动报名、意见反馈、证明申请、校园二手、校园办事八个持久化闭环。运营/超管可在后台处理工单、审核本地申请、维护场地与活动；申请人只访问本人私有记录。公开失物和二手信息采用昵称，认领说明仅相关人可见。
-
-校园办事整合10种申请，活动整合校园活动/志愿服务/竞赛报名；同类入口归并为别名，不重复实现。所有审批均为本地演示，不代表学校正式证明、教务决定或财务审批。
-
-公开目录约150项（当前154项），其中13项可用；首页默认可用服务，可切换全部/待接入。左侧12类导航，首页支持同义词快速过滤与回车全局搜索（应用/公告/图书/菜品）。未接入外部系统的目录不会伪装可用。
-
-当前全量自动化66项通过，详见TEST_REPORT。内嵌浏览器不支持原生prompt，现已替换为页面内异步对话框。
-
-
-## 最新演示范围
-
-当前31个可用入口，包含新增住宿床位、学生请销假、包裹领取、设备借用、校园招聘、问卷，以及12个个人/校园信息工具。首页默认显示80张精选卡，可展开完整目录（当前170项）；规划目录仍清楚标示。
-
-需求工程师H的FEATURE_MATRIX.md列出85项可验收操作能力，区别于31独立入口。独立需求与研究见REQUIREMENTS.md、RESEARCH_NOTES.md；UI优化与实测见UI_REPORT.md。最新服务/HTTP自动化80项通过，部分浏览器流程另有真实记录。
-
-企业微信建议采用内部自建网页应用，但尚未取得企业参数或完成真实部署；虚拟企业/独立沙箱资格未核实。明早申请准备清单与官方资料访问限制已写RESEARCH_NOTES.md。
+全部80项/全部按钮、24h幂等TTL、更多迁移故障、生产备份恢复及容量未验收，不作5000人并发或会话结束后持续开发承诺。

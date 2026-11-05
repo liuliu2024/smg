@@ -1,16 +1,23 @@
+import {coreRepository} from './repositories-v3.mjs';
 import {DatabaseSync} from 'node:sqlite';
 import {randomUUID} from 'node:crypto';
 import {mkdirSync} from 'node:fs';
 export const id=()=>randomUUID(); export const now=()=>new Date().toISOString();
+if(process.env.NODE_TEST_CONTEXT&&!process.env.DB_PATH)throw new Error('tests require isolated DB_PATH');
 mkdirSync('storage',{recursive:true});
 export const db=new DatabaseSync(process.env.DB_PATH||'storage/campus.db');
 db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS records (kind TEXT NOT NULL,id TEXT NOT NULL,data TEXT NOT NULL,PRIMARY KEY(kind,id)); CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY,value TEXT);`);
-export const all=k=>db.prepare('SELECT data FROM records WHERE kind=?').all(k).map(r=>JSON.parse(r.data));
-export const get=(k,i)=>{const r=db.prepare('SELECT data FROM records WHERE kind=? AND id=?').get(k,i);return r?JSON.parse(r.data):null};
-export const put=(k,o)=>{const previous=get(k,o.id);o.version=(previous?.version||0)+1;o.updatedAt=now();o.createdAt??=o.updatedAt;db.prepare('INSERT INTO records VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET data=excluded.data').run(k,o.id,JSON.stringify(o));return o};
-export const del=(k,i)=>db.prepare('DELETE FROM records WHERE kind=? AND id=?').run(k,i);
-export function tx(fn){db.exec('BEGIN IMMEDIATE');try{const r=fn();db.exec('COMMIT');return r}catch(e){db.exec('ROLLBACK');throw e}}
-const serviceDescriptions={library:'检索馆藏，预约取书，查看借阅与归还记录',printing:'上传PDF，确认页码与报价，跟踪打印和取件',dining:'选择档口与餐段，预订餐品并查看取餐进度',notifications:'查看服务提醒、处理结果与个人站内消息',me:'查看个人身份、收藏和各项校园服务记录',repairs:'提交校园设施故障，跟踪受理与维修进度',venues:'查看可预约场地，选择日期时段并管理预约',lost:'发布寻物与招领信息，核实认领并确认归还',activities:'查看校园活动与剩余名额，报名或取消参加',feedback:'提交服务建议与问题，查看工作人员回复',certificates:'提交证明申请，查看人工审核意见与演示结果',marketplace:'发布闲置物品，浏览校园二手信息并管理上下架',affairs:'在线提交校园办事申请，查看审核意见与处理进度'};
+export const core=coreRepository(db);
+db.exec('CREATE TABLE IF NOT EXISTS v3_legacy_migration_archive(kind TEXT NOT NULL,id TEXT NOT NULL,sourceJson TEXT NOT NULL,migratedAt TEXT NOT NULL,PRIMARY KEY(kind,id))');
+db.exec('PRAGMA foreign_keys=ON');
+let depth=0;
+export function tx(fn){const level=depth++;const name='nested_'+level;db.exec(level?'SAVEPOINT '+name:'BEGIN IMMEDIATE');try{const r=fn();db.exec(level?'RELEASE SAVEPOINT '+name:'COMMIT');return r}catch(e){db.exec(level?'ROLLBACK TO SAVEPOINT '+name:'ROLLBACK');if(level)db.exec('RELEASE SAVEPOINT '+name);throw e}finally{depth--}}
+export const all=k=>core.handles(k)?core.all(k):db.prepare('SELECT data FROM records WHERE kind=?').all(k).map(r=>JSON.parse(r.data));
+export const get=(k,i)=>core.handles(k)?core.get(k,i):(()=>{const r=db.prepare('SELECT data FROM records WHERE kind=? AND id=?').get(k,i);return r?JSON.parse(r.data):null})();
+export const put=(k,o)=>{const previous=get(k,o.id);o.version=(previous?.version||0)+1;o.updatedAt=now();o.createdAt??=o.updatedAt;if(core.handles(k))return core.put(k,o);db.prepare('INSERT INTO records VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET data=excluded.data').run(k,o.id,JSON.stringify(o));return o};
+export const del=(k,i)=>core.handles(k)?core.del(k,i):db.prepare('DELETE FROM records WHERE kind=? AND id=?').run(k,i);
+// Transactional one-time migration retains IDs, business history and original timestamps.
+if(!db.prepare("SELECT value FROM meta WHERE key='typed_core_v3_2'").get())tx(()=>{if(db.prepare("SELECT value FROM meta WHERE key='typed_core_v3_2'").get())return;db.exec('PRAGMA defer_foreign_keys=ON');const rows=db.prepare('SELECT kind,data FROM records').all();for(const row of rows)if(core.handles(row.kind)){const o=JSON.parse(row.data);db.prepare('INSERT OR IGNORE INTO v3_legacy_migration_archive VALUES(?,?,?,?)').run(row.kind,o.id,row.data,now());o.version??=1;o.createdAt??=now();o.updatedAt??=o.createdAt;core.put(row.kind,o)}for(const row of rows)if(core.handles(row.kind))db.prepare('DELETE FROM records WHERE kind=?').run(row.kind);db.prepare("INSERT INTO meta VALUES('typed_core_v3_2','1')").run()});const serviceDescriptions={library:'检索馆藏，预约取书，查看借阅与归还记录',printing:'上传PDF，确认页码与报价，跟踪打印和取件',dining:'选择档口与餐段，预订餐品并查看取餐进度',notifications:'查看服务提醒、处理结果与个人站内消息',me:'查看个人身份、收藏和各项校园服务记录',repairs:'提交校园设施故障，跟踪受理与维修进度',venues:'查看可预约场地，选择日期时段并管理预约',lost:'发布寻物与招领信息，核实认领并确认归还',activities:'查看校园活动与剩余名额，报名或取消参加',feedback:'提交服务建议与问题，查看工作人员回复',certificates:'提交证明申请，查看人工审核意见与演示结果',marketplace:'发布闲置物品，浏览校园二手信息并管理上下架',affairs:'在线提交校园办事申请，查看审核意见与处理进度'};
 const originalPlannedNames=['校园广播','校园摄影','公共浴室','共享雨伞','宿舍安全巡检','体育测试','节能倡议','校园寻物地图','校园二手集市','校史馆参观','校园活动日历','公益捐赠','绿色出行','社区服务','食堂意见簿'];
 export function seed(){if(get('users','student'))return;tx(()=>{
 if(get('users','student'))return;
@@ -107,3 +114,8 @@ const mappings=[['housing','宿舍申请','住宿床位','申请住宿，查看�
 for(const [module,legacyName,name,description,category] of mappings){let app=all('apps').find(x=>x.extensionModule===module);if(!app){app=legacyName?all('apps').find(x=>x.name===legacyName&&['PLANNED','DISABLED'].includes(x.status)):null;put('apps',{...app,id:app?.id||'extension-'+module,code:app?.code||'extension-'+module,name,description,category,status:'ACTIVE',extensionModule:module,internalPath:'/extensions/'+module,mergedInto:undefined,aliases:legacyName?[legacyName]:[],roles:app?.roles||[]})}}
 const affairs=all('apps').find(x=>x.coreModule==='affairs');if(affairs?.aliases?.some(x=>['学生请假','宿舍申请'].includes(x)))put('apps',{...affairs,aliases:affairs.aliases.filter(x=>!['学生请假','宿舍申请'].includes(x))});
 });
+
+
+
+export function syncPortalRoutes(){const app=all('apps').find(a=>a.utilityModule==='guides');if(app&&app.internalPath==='/utilities/guides')put('apps',{...app,internalPath:'/guides'})}
+syncPortalRoutes();
